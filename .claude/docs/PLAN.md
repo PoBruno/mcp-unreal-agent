@@ -1,5 +1,26 @@
 # PLAN — Agent context & tool cohesion
 
+## Execution status — DONE (2026-06-07)
+
+All workstreams implemented, built, and verified live:
+- ✅ **A `inspect`** + **B `get_edit_context`** — layered/budgeted aggregators (TS); `inspect("level")` covers describe_level.
+- ✅ **C ID-chain fix** — `autoRefs` emits input-matching keys (`refs.blueprint`→`blueprint`, etc.); verified live. ADR-009.
+- ✅ **D summary un-regression** — `get_blueprint_summary`/`describe_graph`/`describe_material` return the compact summary in `data` again (163 vs 1830 chars confirmed). ADR-008.
+- ✅ **E capabilities** — `list_assets` (97 anim seqs / 2 skel meshes found live), `set_component_default` (SCS), `connect_anim_entry` (entry-not-connected warning gone), `get_class_api` (TS). All committed; new C++ routes verified.
+
+### Follow-up gaps surfaced (anim authoring, not blocking)
+- `add_anim_state(animationAsset=…)` creates the state but doesn't wire the sequence
+  into the state's inner Output Pose ("Result was visible but ignored").
+- `add_anim_transition(bBidirectional)` warns "bidirectional not supported" in UE5.7 —
+  should emit two one-way transitions instead.
+- Transitions created without a rule warn "will never be taken" — expose/auto-add a rule.
+- `set_component_default` covers SCS components only; inherited components (Character
+  Mesh) still need `python_exec`.
+
+---
+
+# PLAN — Agent context & tool cohesion (design, as executed)
+
 Goal: give the agent the *right* context cheaply, and make the ~120 tools actually
 chain. Driven by the question "should we have a tool that returns complete context?"
 — answer: yes, but as a **layered, budgeted, ref-returning `inspect`**, not a full dump.
