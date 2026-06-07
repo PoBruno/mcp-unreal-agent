@@ -17,3 +17,13 @@ Thumbs.db
 # Local agent transcripts / scratch
 .claude/local/
 .scratch/
+
+# Local plugin build output (UAT BuildPlugin package, logs, pdb)
+.build/
+
+# Local UE host project for dogfooding / manual testing (root-anchored, stays local).
+# Note: leading slash so this does NOT match Tools/test/.
+/test/
+
+# Local MCP config (machine-specific UE_PROJECT_DIR path)
+.mcp.json

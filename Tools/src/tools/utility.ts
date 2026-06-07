@@ -1,23 +1,47 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, ueGet, uePost, isUEHealthy, gracefulShutdown, state } from "../ue-bridge.js";
+import { ok, fail, toMcp, type ToolResult } from "../types.js";
+
+export type ServerStatusData = {
+  status: string;
+  mode: string;
+  blueprintCount: number;
+  mapCount: number | null;
+};
+
+/** Pure mapper from the raw /api/health payload to the structured contract. */
+export function buildServerStatusResult(raw: any, editorMode: boolean): ToolResult<ServerStatusData> {
+  if (raw?.error) return fail("UE_HTTP_FAILED", String(raw.error));
+  const data: ServerStatusData = {
+    status: raw?.status ?? "ok",
+    mode: raw?.mode ?? (editorMode ? "editor" : "commandlet"),
+    blueprintCount: raw?.blueprintCount ?? 0,
+    mapCount: raw?.mapCount ?? null,
+  };
+  return ok(data, {
+    nextSteps: [
+      "call list_blueprints to enumerate Blueprints in the project",
+      "call rescan_assets if newly created assets are missing",
+    ],
+  });
+}
 
 export function registerUtilityTools(server: McpServer): void {
   server.tool(
     "server_status",
-    "Check UE5 Blueprint server status. Starts the server if not running (blocks until ready).",
+    "Check UE5 server status (the health tool). Starts the server if not running (blocks until ready). Returns the structured contract with mode and indexed asset counts.",
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/health");
-      return {
-        content: [{
-          type: "text" as const,
-          text: `UE5 Blueprint server is running (${data.mode ?? (state.editorMode ? "editor" : "commandlet")} mode).\nBlueprints indexed: ${data.blueprintCount}\nMaps indexed: ${data.mapCount ?? "?"}`,
-        }],
-      };
+      try {
+        const raw = await ueGet("/api/health");
+        return toMcp(buildServerStatusResult(raw, state.editorMode));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 

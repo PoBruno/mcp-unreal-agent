@@ -3,11 +3,46 @@ import { z } from "zod";
 import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
 import { summarizeBlueprint } from "../graph-describe.js";
 import { describeGraph } from "../graph-describe.js";
+import { ok, fail, toMcp, type ToolResult } from "../types.js";
+
+export type BlueprintEntry = {
+  name: string;
+  path: string;
+  parentClass?: string;
+  isLevelBlueprint?: boolean;
+};
+
+export type ListBlueprintsData = {
+  count: number;
+  total: number;
+  blueprints: BlueprintEntry[];
+};
+
+/** Pure mapper from the raw /api/list payload to the structured contract. */
+export function buildListBlueprintsResult(raw: any): ToolResult<ListBlueprintsData> {
+  if (raw?.error) return fail("UE_HTTP_FAILED", String(raw.error));
+
+  const blueprints: BlueprintEntry[] = Array.isArray(raw?.blueprints) ? raw.blueprints : [];
+  const data: ListBlueprintsData = {
+    count: raw?.count ?? blueprints.length,
+    total: raw?.total ?? blueprints.length,
+    blueprints,
+  };
+
+  const blueprintIds = blueprints.map((bp) => bp.path).filter((p): p is string => Boolean(p));
+
+  return ok(data, {
+    refs: { blueprintIds },
+    nextSteps: blueprintIds.length
+      ? ["call get_blueprint_summary with one of refs.blueprintIds to inspect a Blueprint"]
+      : ["no Blueprints matched — broaden the filter or call rescan_assets if assets were just created"],
+  });
+}
 
 export function registerReadTools(server: McpServer): void {
   server.tool(
     "list_blueprints",
-    "List all Blueprint assets in the UE5 project, including level blueprints from .umap files. Optionally filter by name/path substring, parent class, or type (regular vs level).",
+    "List all Blueprint assets in the UE5 project, including level blueprints from .umap files. Optionally filter by name/path substring, parent class, or type (regular vs level). Returns refs.blueprintIds[] for chaining into get_blueprint_summary.",
     {
       filter: z.string().optional().describe("Substring to match against Blueprint name or path"),
       parentClass: z.string().optional().describe("Filter by parent class name"),
@@ -15,24 +50,18 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ filter, parentClass, type: bpType }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/list", {
-        filter: filter || "",
-        parentClass: parentClass || "",
-        type: bpType || "all",
-      });
-
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = data.blueprints.map(
-        (bp: any) => {
-          const levelTag = bp.isLevelBlueprint ? " Level" : "";
-          return `${bp.name} (${bp.path}) [${bp.parentClass || "?"}${levelTag}]`;
-        }
-      );
-      const summary = `Found ${data.count} of ${data.total} blueprints.\n\n${lines.join("\n")}`;
-      return { content: [{ type: "text" as const, text: summary }] };
+      try {
+        const raw = await ueGet("/api/list", {
+          filter: filter || "",
+          parentClass: parentClass || "",
+          type: bpType || "all",
+        });
+        return toMcp(buildListBlueprintsResult(raw));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 

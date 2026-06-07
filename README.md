@@ -47,10 +47,44 @@ Both prompts work because the install playbook is the same — it lives at [inst
 
 | Requirement | Version |
 |---|---|
-| Unreal Engine | 5.4+ |
-| Node.js | 18+ |
+| Unreal Engine | 5.4+ (built and verified against 5.7) |
+| Node.js | 18+ (CI runs 20) |
 | Visual Studio | 2022 with C++ Game Dev workload (for plugin compile) |
 | OS | Windows 10/11 (other platforms not yet tested) |
+
+---
+
+## Build from source
+
+### TypeScript MCP server
+
+```powershell
+cd Tools
+npm install
+npm run build      # tsc -> Tools/dist/index.js
+npm run test:unit  # UE5-free mapper tests (no engine needed)
+```
+
+Full integration suite (`npm test`) boots a UE5 commandlet and needs an engine install on a self-hosted runner — see [.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md) backlog.
+
+### C++ plugin
+
+Compile the plugin standalone against your engine with UAT `BuildPlugin`:
+
+```powershell
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\RunUAT.bat" `
+  BuildPlugin -Plugin="<path>\UnrealAgent.uplugin" `
+  -Package="<out-dir>" -TargetPlatforms=Win64
+```
+
+Or, with the plugin in a host project's `Plugins/UnrealAgent/`, build the editor target:
+
+```powershell
+& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" `
+  <Project>Editor Win64 Development "<path>\<Project>.uproject" -waitmutex
+```
+
+Produces `UnrealEditor-UnrealAgent.dll`. Open the project (or restart the editor) to load it — the editor subsystem starts the HTTP server on port 9847.
 
 ---
 

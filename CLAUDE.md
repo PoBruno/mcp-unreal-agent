@@ -323,7 +323,7 @@ Every MCP tool must return:
 type ToolResult<T> = {
   ok: boolean;
   data?: T;                    // shape varies per tool
-  refs?: Record<string, string>; // IDs other tools can consume
+  refs?: Record<string, string | string[]>; // IDs (or id lists) other tools can consume
   nextSteps?: string[];        // hints, not commands
   warnings?: string[];
   errorCode?: string;          // when ok=false
