@@ -44,6 +44,7 @@ import { registerWidgetTools } from "./tools/widgets.js";
 
 // Context aggregators (layered/budgeted — not raw dumps)
 import { registerInspectTools } from "./tools/inspect.js";
+import { registerCapabilityTools } from "./tools/capabilities.js";
 
 // Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
@@ -94,6 +95,7 @@ registerOutputLogTools(server);
 registerUndoRedoTools(server);
 registerWidgetTools(server);
 registerInspectTools(server);
+registerCapabilityTools(server);
 
 // Register resources
 registerBlueprintListResource(server);

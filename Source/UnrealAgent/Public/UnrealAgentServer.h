@@ -399,6 +399,11 @@ private:
 	// ----- Python -----
 	FString HandlePythonExec(const FString& Body);
 
+	// ----- Context / capability tools -----
+	FString HandleListAssets(const FString& Body);
+	FString HandleSetComponentDefault(const FString& Body);
+	FString HandleConnectAnimEntry(const FString& Body);
+
 	// ----- Serialization -----
 	TSharedRef<FJsonObject> SerializeBlueprint(UBlueprint* BP);
 	TSharedPtr<FJsonObject> SerializeGraph(UEdGraph* Graph);

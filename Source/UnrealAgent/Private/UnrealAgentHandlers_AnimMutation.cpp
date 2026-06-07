@@ -1664,3 +1664,58 @@ FString FUnrealAgentServer::HandleSetStateBlendSpace(const FString& Body)
 	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }
+
+// ============================================================
+// HandleConnectAnimEntry — connect the state machine ENTRY to a state so the
+// machine actually outputs a pose (the entry isn't auto-connected on add_anim_state).
+// ============================================================
+
+FString FUnrealAgentServer::HandleConnectAnimEntry(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid()) { return MakeErrorJson(TEXT("Invalid JSON body")); }
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString GraphName = Json->GetStringField(TEXT("graph"));
+	FString StateName = Json->GetStringField(TEXT("stateName"));
+	if (BlueprintName.IsEmpty() || GraphName.IsEmpty() || StateName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, graph, stateName"));
+	}
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP) { return MakeErrorJson(LoadError); }
+	if (!Cast<UAnimBlueprint>(BP)) { return MakeErrorJson(FString::Printf(TEXT("'%s' is not an Animation Blueprint"), *BlueprintName)); }
+
+	UAnimationStateMachineGraph* SMGraph = FindStateMachineGraph(BP, GraphName);
+	if (!SMGraph) { return MakeErrorJson(FString::Printf(TEXT("State machine graph '%s' not found"), *GraphName)); }
+
+	UAnimStateNode* StateNode = FindStateByName(SMGraph, StateName);
+	if (!StateNode) { return MakeErrorJson(FString::Printf(TEXT("State '%s' not found in '%s'"), *StateName, *GraphName)); }
+
+	UAnimStateEntryNode* Entry = nullptr;
+	for (UEdGraphNode* Node : SMGraph->Nodes)
+	{
+		if (UAnimStateEntryNode* E = Cast<UAnimStateEntryNode>(Node)) { Entry = E; break; }
+	}
+	if (!Entry) { return MakeErrorJson(TEXT("State machine has no entry node")); }
+
+	UEdGraphPin* EntryOut = Entry->GetOutputPin();
+	UEdGraphPin* StateIn = StateNode->GetInputPin();
+	if (!EntryOut || !StateIn) { return MakeErrorJson(TEXT("Could not find entry/state pins")); }
+
+	EntryOut->BreakAllPinLinks();
+	EntryOut->MakeLinkTo(StateIn);
+
+	BP->Modify();
+	const bool bSaved = SaveBlueprintPackage(BP);
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("graph"), GraphName);
+	Result->SetStringField(TEXT("entryState"), StateName);
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}

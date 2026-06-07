@@ -911,6 +911,10 @@ bool FUnrealAgentServer::Start(int32 InPort, bool bEditorMode)
 	// Presence / offscreen capture
 	Router->BindRoute(FHttpPath(TEXT("/api/capture-scene")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("captureScene")));
 	Router->BindRoute(FHttpPath(TEXT("/api/set-presence")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("setPresence")));
+	// Context / capability tools
+	Router->BindRoute(FHttpPath(TEXT("/api/list-assets")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("listAssets")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-component-default")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("setComponentDefault")));
+	Router->BindRoute(FHttpPath(TEXT("/api/connect-anim-entry")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("connectAnimEntry")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1271,6 +1275,9 @@ void FUnrealAgentServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("pythonExec"),         [this](const TMap<FString, FString>&, const FString& B) { return HandlePythonExec(B); });
 	HandlerMap.Add(TEXT("captureScene"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleCaptureScene(B); });
 	HandlerMap.Add(TEXT("setPresence"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleSetPresence(B); });
+	HandlerMap.Add(TEXT("listAssets"),         [this](const TMap<FString, FString>&, const FString& B) { return HandleListAssets(B); });
+	HandlerMap.Add(TEXT("setComponentDefault"),[this](const TMap<FString, FString>&, const FString& B) { return HandleSetComponentDefault(B); });
+	HandlerMap.Add(TEXT("connectAnimEntry"),   [this](const TMap<FString, FString>&, const FString& B) { return HandleConnectAnimEntry(B); });
 }
 
 // ============================================================
