@@ -12,7 +12,7 @@ Apply to every file under `Tools/src/tools/`. This is the **agent-facing API con
 export type ToolResult<T = unknown> = {
   ok: boolean;
   data?: T;
-  refs?: Record<string, string>;
+  refs?: Record<string, string | string[]>;
   nextSteps?: string[];
   warnings?: string[];
   errorCode?: string;
@@ -23,7 +23,7 @@ export type ToolResult<T = unknown> = {
 |---|---|
 | `ok` | `true` if operation succeeded. `false` → caller must inspect `errorCode`. |
 | `data` | Tool-specific result payload. Type-parameterized. |
-| `refs` | Map of named IDs the agent passes to subsequent tools. Names follow `<entity>Id`: `blueprintId`, `materialId`, `actorId`, `sequenceId`, `mrqJobId`. |
+| `refs` | Map of named IDs the agent passes to subsequent tools. Single id (`<entity>Id`: `blueprintId`, `materialId`, …) or an id list for enumerations (`<entity>Ids`: `blueprintIds`). |
 | `nextSteps` | Free-form hints. Never imperative — phrased as "you can call X next" or "consider Y if Z". |
 | `warnings` | Non-fatal issues. Operation succeeded but something deserves attention. |
 | `errorCode` | Stable code from the registry. Always set when `ok=false`. Never invent codes without adding to registry. |

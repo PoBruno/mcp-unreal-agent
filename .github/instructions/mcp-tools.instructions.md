@@ -12,7 +12,7 @@ Apply to any file under `Tools/src/tools/`. Mirror of [`.claude/rules/mcp-tools.
 export type ToolResult<T = unknown> = {
   ok: boolean;
   data?: T;
-  refs?: Record<string, string>;
+  refs?: Record<string, string | string[]>;
   nextSteps?: string[];
   warnings?: string[];
   errorCode?: string;
@@ -23,7 +23,7 @@ export type ToolResult<T = unknown> = {
 |---|---|
 | `ok` | `true` if the operation succeeded as intended. `false` means the caller must check `errorCode`. |
 | `data` | Tool-specific result payload. Type-parameterized. |
-| `refs` | Map of named IDs the agent can pass to other tools. Names follow `<entityType>Id` convention: `blueprintId`, `materialId`, `actorId`, `sequenceId`, `mrqJobId`. |
+| `refs` | Map of named IDs the agent can pass to other tools. Single id (`<entityType>Id`: `blueprintId`, `materialId`, …) or an id list for enumerations (`<entityType>Ids`: `blueprintIds`). |
 | `nextSteps` | Free-form hints for the agent. Never imperative. Phrased as "you can call X next" or "consider Y if Z". |
 | `warnings` | Non-fatal issues. The operation succeeded but something deserves attention (deprecated input field, asset was dirty before save, etc.). |
 | `errorCode` | Stable machine-readable code from the registry below. Always set when `ok=false`. Never invent new codes without adding them here. |
