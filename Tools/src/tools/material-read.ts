@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
+import { ok, toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 import { describeMaterial } from "../material-describe.js";
 
 export function registerMaterialReadTools(server: McpServer): void {
@@ -13,20 +14,17 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ filter, type: matType }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/materials", {
-        filter: filter || "",
-        type: matType || "all",
-      });
-
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = data.materials.map(
-        (mat: any) => `${mat.name} (${mat.path}) [${mat.type}]`
-      );
-      const summary = `Found ${data.count} of ${data.total} materials.\n\n${lines.join("\n")}`;
-      return { content: [{ type: "text" as const, text: summary }] };
+      try {
+        const data = await ueGet("/api/materials", {
+          filter: filter || "",
+          type: matType || "all",
+        });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -38,12 +36,14 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/material", { name });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+      try {
+        const data = await ueGet("/api/material", { name });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -55,12 +55,14 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/material-graph", { name });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+      try {
+        const data = await ueGet("/api/material-graph", { name });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -72,13 +74,15 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/describe-material", { material: name });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const text = data.description ? data.description : describeMaterial(data);
-      return { content: [{ type: "text" as const, text }] };
+      try {
+        const data = await uePost("/api/describe-material", { material: name });
+        if (data?.error) return toMcp(wrapRaw(data));
+        return toMcp(ok({ description: describeMaterial(data) }, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -91,26 +95,17 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ query, maxResults }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/search-materials", {
-        query,
-        maxResults: String(maxResults),
-      });
-
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Found ${data.resultCount} results for "${query}":\n`);
-
-      for (const r of data.results) {
-        let line = `[${r.material}] ${r.matchType}: ${r.matchValue}`;
-        if (r.expressionType) line += ` (${r.expressionType})`;
-        if (r.parameterName) line += ` param:${r.parameterName}`;
-        lines.push(line);
+      try {
+        const data = await ueGet("/api/search-materials", {
+          query,
+          maxResults: String(maxResults),
+        });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -122,27 +117,14 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ material }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/material-references", { material });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`References to: ${data.material || material}`);
-      lines.push(`Total referencers: ${data.totalReferencers}`);
-
-      if (data.referencers?.length) {
-        lines.push("");
-        for (const ref of data.referencers) {
-          lines.push(`  ${ref}`);
-        }
+      try {
+        const data = await uePost("/api/material-references", { material });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.totalReferencers === 0) {
-        lines.push("\nNo referencers found.");
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -154,21 +136,14 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ filter }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/material-functions", { filter: filter || "" });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Found ${data.count} material functions.\n`);
-
-      for (const fn of data.functions) {
-        let line = `${fn.name} (${fn.path})`;
-        if (fn.description) line += ` — ${fn.description}`;
-        lines.push(line);
+      try {
+        const data = await ueGet("/api/material-functions", { filter: filter || "" });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -180,12 +155,14 @@ export function registerMaterialReadTools(server: McpServer): void {
     },
     async ({ name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/material-function", { name });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+      try {
+        const data = await ueGet("/api/material-function", { name });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

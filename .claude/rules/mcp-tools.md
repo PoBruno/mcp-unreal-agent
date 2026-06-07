@@ -71,13 +71,19 @@ server.tool(
 
 ## ID chaining convention
 
-| Tool returns | Other tools consume as |
-|---|---|
-| `refs.blueprintId` | `blueprintId` param |
-| `refs.materialId` | `materialId` param |
-| `refs.actorId` | `actorId` param |
-| `refs.sequenceId` | `sequenceId` param |
-| `refs.mrqJobId` | `jobId` param |
+`refs` are emitted under the EXACT key the consuming tool accepts as input (ADR-009),
+so `refs.blueprint` feeds the next tool's `blueprint` param verbatim. The `<entity>Id`
+convention name is kept as an alias for the same value.
+
+| Tool returns (primary key) | + alias | Consumed by param |
+|---|---|---|
+| `refs.blueprint` (path/name) | `blueprintId` | `blueprint` |
+| `refs.material` | `materialId` | `material` |
+| `refs.actorLabel` / `refs.label` | `actorId` | `actorLabel` / `label` |
+| `refs.graph` | `graphId` | `graph` |
+| `refs.nodeId` | — | `nodeId` |
+| `refs.assetPath` | `assetId` | `assetPath` |
+| `refs.blueprintIds[]` / `refs.materialIds[]` | — | list enumerations |
 
 When designing a tool, work backwards from the chain:
 1. What does the agent know before calling? (inputs)

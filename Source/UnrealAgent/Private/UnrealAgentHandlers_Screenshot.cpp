@@ -5,6 +5,7 @@
 #include "LevelEditorViewport.h"
 #include "UnrealClient.h"
 #include "HighResScreenshot.h"
+#include "RenderingThread.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "ImageUtils.h"
@@ -55,20 +56,39 @@ FString FUnrealAgentServer::HandleTakeScreenshot(const FString& Body)
 
 	// Prefer the PIE game viewport when playing — that's where gameplay (and the
 	// framing component) actually renders. Falls back to the editor level viewport.
+	// R-04: GetLevelViewportClients()[0] is often NOT the realized perspective
+	// viewport (size 0x0). Prefer the active client, then any client with a valid
+	// size, and force a redraw so the back buffer is current before ReadPixels.
 	FViewport* Viewport = nullptr;
 	if (GEditor->PlayWorld && GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
 	{
 		Viewport = GEngine->GameViewport->Viewport;
 	}
-	else if (GEditor->GetLevelViewportClients().Num() > 0 && GEditor->GetLevelViewportClients()[0])
+	if ((!Viewport || Viewport->GetSizeXY().X <= 0) && GCurrentLevelEditingViewportClient
+		&& GCurrentLevelEditingViewportClient->Viewport)
 	{
-		Viewport = GEditor->GetLevelViewportClients()[0]->Viewport;
+		Viewport = GCurrentLevelEditingViewportClient->Viewport;
+	}
+	if (!Viewport || Viewport->GetSizeXY().X <= 0)
+	{
+		for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
+		{
+			if (Client && Client->Viewport && Client->Viewport->GetSizeXY().X > 0)
+			{
+				Viewport = Client->Viewport;
+				break;
+			}
+		}
 	}
 
 	if (!Viewport)
 	{
 		return MakeErrorJson(TEXT("No active viewport found."));
 	}
+
+	// Force the viewport to render a frame so the back buffer is populated.
+	GEditor->RedrawLevelEditingViewports(true);
+	FlushRenderingCommands();
 
 	// Read pixels from viewport
 	TArray<FColor> Bitmap;
@@ -77,7 +97,7 @@ FString FUnrealAgentServer::HandleTakeScreenshot(const FString& Body)
 
 	if (Width <= 0 || Height <= 0)
 	{
-		return MakeErrorJson(TEXT("Viewport has invalid dimensions."));
+		return MakeErrorJson(TEXT("Viewport has invalid dimensions (no realized level viewport — ensure a level editor viewport is open/visible)."));
 	}
 
 	bool bReadSuccess = Viewport->ReadPixels(Bitmap);
@@ -154,10 +174,18 @@ FString FUnrealAgentServer::HandleTakeHighResScreenshot(const FString& Body)
 	FString OutputDir = FPaths::ProjectSavedDir() / TEXT("Screenshots");
 	FString FullPath = OutputDir / Filename;
 
-	FLevelEditorViewportClient* ViewportClient = nullptr;
-	if (GEditor->GetLevelViewportClients().Num() > 0)
+	// R-04: prefer the active viewport client, then any with a valid size.
+	FLevelEditorViewportClient* ViewportClient = GCurrentLevelEditingViewportClient;
+	if (!ViewportClient || !ViewportClient->Viewport || ViewportClient->Viewport->GetSizeXY().X <= 0)
 	{
-		ViewportClient = GEditor->GetLevelViewportClients()[0];
+		for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
+		{
+			if (Client && Client->Viewport && Client->Viewport->GetSizeXY().X > 0)
+			{
+				ViewportClient = Client;
+				break;
+			}
+		}
 	}
 
 	if (!ViewportClient || !ViewportClient->Viewport)
@@ -165,21 +193,22 @@ FString FUnrealAgentServer::HandleTakeHighResScreenshot(const FString& Body)
 		return MakeErrorJson(TEXT("No active viewport found."));
 	}
 
+	// Fall back to a sane resolution when the viewport hasn't been realized (size 0).
+	int32 BaseW = ViewportClient->Viewport->GetSizeXY().X;
+	int32 BaseH = ViewportClient->Viewport->GetSizeXY().Y;
+	if (BaseW <= 0 || BaseH <= 0) { BaseW = 1920; BaseH = 1080; }
+
 	// Configure high-res screenshot settings
 	FHighResScreenshotConfig& Config = GetHighResScreenshotConfig();
-	Config.SetResolution(
-		ViewportClient->Viewport->GetSizeXY().X,
-		ViewportClient->Viewport->GetSizeXY().Y,
-		ResMultiplier
-	);
+	Config.SetResolution(BaseW, BaseH, ResMultiplier);
 	Config.SetFilename(FullPath);
 	Config.bMaskEnabled = false;
 
 	// Request the screenshot
 	ViewportClient->Viewport->TakeHighResScreenShot();
 
-	int32 FinalWidth = FMath::CeilToInt(ViewportClient->Viewport->GetSizeXY().X * ResMultiplier);
-	int32 FinalHeight = FMath::CeilToInt(ViewportClient->Viewport->GetSizeXY().Y * ResMultiplier);
+	int32 FinalWidth = FMath::CeilToInt(BaseW * ResMultiplier);
+	int32 FinalHeight = FMath::CeilToInt(BaseH * ResMultiplier);
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), true);

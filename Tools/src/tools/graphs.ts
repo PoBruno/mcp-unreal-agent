@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerGraphTools(server: McpServer): void {
   server.tool(
@@ -12,19 +13,14 @@ export function registerGraphTools(server: McpServer): void {
     },
     async ({ blueprint, newParentClass }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/reparent-blueprint", { blueprint, newParentClass });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Blueprint reparented successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Old parent: ${data.oldParentClass}`);
-      lines.push(`New parent: ${data.newParentClass}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/reparent-blueprint", { blueprint, newParentClass });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -41,25 +37,20 @@ export function registerGraphTools(server: McpServer): void {
     },
     async ({ blueprintName, packagePath, parentClass, blueprintType }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/create-blueprint", { blueprintName, packagePath, parentClass, blueprintType });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Blueprint created successfully.`);
-      lines.push(`Name: ${data.blueprintName}`);
-      lines.push(`Path: ${data.assetPath}`);
-      lines.push(`Parent: ${data.parentClass}`);
-      lines.push(`Type: ${data.blueprintType}`);
-      if (data.graphs?.length) lines.push(`Graphs: ${data.graphs.join(", ")}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  get_blueprint(blueprint="${data.blueprintName}") — inspect the new Blueprint`);
-      lines.push(`  add_node(blueprint="${data.blueprintName}", ...) — add logic`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-blueprint", { blueprintName, packagePath, parentClass, blueprintType });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "get_blueprint to inspect the new Blueprint",
+            "add_node to add logic",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -73,28 +64,20 @@ export function registerGraphTools(server: McpServer): void {
     },
     async ({ blueprint, graphName, graphType }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/create-graph", { blueprint, graphName, graphType });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Graph created successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Graph: ${data.graphName}`);
-      lines.push(`Type: ${data.graphType}`);
-      if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      if (graphType === "customEvent") {
-        lines.push(`  add_node(blueprint="${blueprint}", graph="EventGraph", ...) — add logic after the event`);
-      } else {
-        lines.push(`  add_node(blueprint="${blueprint}", graph="${graphName}", ...) — add nodes to the new graph`);
+      try {
+        const data = await uePost("/api/create-graph", { blueprint, graphName, graphType });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "add_node to add nodes to the new graph",
+            "get_blueprint_graph to inspect the graph",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      lines.push(`  get_blueprint_graph(blueprint="${blueprint}", graph="${graphName}") — inspect the graph`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -107,20 +90,14 @@ export function registerGraphTools(server: McpServer): void {
     },
     async ({ blueprint, graphName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/delete-graph", { blueprint, graphName });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Graph deleted successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Graph: ${data.graphName}`);
-      lines.push(`Type: ${data.graphType}`);
-      lines.push(`Nodes removed: ${data.nodeCount}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/delete-graph", { blueprint, graphName });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -134,23 +111,17 @@ export function registerGraphTools(server: McpServer): void {
     },
     async ({ blueprint, graphName, newName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/rename-graph", { blueprint, graphName, newName });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Graph renamed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Old name: ${data.oldName}`);
-      lines.push(`New name: ${data.newName}`);
-      lines.push(`Type: ${data.graphType}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  get_blueprint_graph(blueprint="${blueprint}", graph="${data.newName}") — inspect the renamed graph`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/rename-graph", { blueprint, graphName, newName });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["get_blueprint_graph to inspect the renamed graph"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

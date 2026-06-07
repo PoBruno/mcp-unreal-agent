@@ -207,11 +207,14 @@ export function describeGraph(graphData: any): string {
     nodeMap[n.id] = n;
   }
 
-  // Find entry points: Event nodes, CustomEvent nodes, FunctionEntry nodes
+  // Find entry points: Event nodes, override events (BeginPlay/Tick/etc),
+  // CustomEvent nodes, FunctionEntry nodes (R-06).
   const entryNodes = nodes.filter(
     (n: any) =>
       n.nodeType === "Event" ||
+      n.nodeType === "OverrideEvent" ||
       n.nodeType === "CustomEvent" ||
+      n.class?.includes("Event") ||
       n.class?.includes("FunctionEntry") ||
       n.class?.includes("K2Node_Tunnel") && n.pins?.some((p: any) => p.type === "exec" && p.direction === "Output" && p.connections?.length)
   );

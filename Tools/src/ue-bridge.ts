@@ -57,21 +57,28 @@ export function findEditorCmd(): string | null {
     }
   }
 
-  // Priority 3: scan for any installed UE5 version
-  const epicGamesDir = "C:\\Program Files\\Epic Games";
-  try {
-    const entries = fs.readdirSync(epicGamesDir);
-    for (const entry of entries.sort().reverse()) {
-      if (entry.startsWith("UE_")) {
-        const candidate = path.join(epicGamesDir, entry, "Engine", "Binaries", "Win64", "UnrealEditor-Cmd.exe");
-        if (fs.existsSync(candidate)) {
-          const detectedVersion = entry.replace("UE_", "");
-          console.error(`[UnrealAgent] Found engine ${detectedVersion} (no match for .uproject version${engineVersion ? ` ${engineVersion}` : ""})`);
-          return candidate;
+  // Priority 3: scan for any installed UE5 version across all drives.
+  // Engines are not always on C: (R-03: this machine has UE on D:).
+  const driveLetters = ["C", "D", "E", "F", "G", "H"];
+  const epicGamesDirs = driveLetters.flatMap((d) => [
+    `${d}:\\Program Files\\Epic Games`,
+    `${d}:\\Program Files (x86)\\Epic Games`,
+  ]);
+  for (const epicGamesDir of epicGamesDirs) {
+    try {
+      const entries = fs.readdirSync(epicGamesDir);
+      for (const entry of entries.sort().reverse()) {
+        if (entry.startsWith("UE_")) {
+          const candidate = path.join(epicGamesDir, entry, "Engine", "Binaries", "Win64", "UnrealEditor-Cmd.exe");
+          if (fs.existsSync(candidate)) {
+            const detectedVersion = entry.replace("UE_", "");
+            console.error(`[UnrealAgent] Found engine ${detectedVersion} at ${epicGamesDir} (no match for .uproject version${engineVersion ? ` ${engineVersion}` : ""})`);
+            return candidate;
+          }
         }
       }
-    }
-  } catch { /* directory may not exist */ }
+    } catch { /* directory may not exist on this drive */ }
+  }
 
   return null;
 }
@@ -141,10 +148,17 @@ export async function gracefulShutdown(): Promise<void> {
   }
 }
 
+/**
+ * Health probe timeout. The editor's game thread can be busy (compiling a
+ * Blueprint, loading assets) for several seconds, during which it can't answer.
+ * A 2s timeout produced false "not running" results mid-session (R-03).
+ */
+export const HEALTH_TIMEOUT_MS = parseInt(process.env.UE_HEALTH_TIMEOUT_MS || "8000", 10);
+
 /** Returns the health payload if the server is reachable, or null. */
-export async function getUEHealth(): Promise<{ status: string; mode: string; blueprintCount: number; mapCount: number } | null> {
+export async function getUEHealth(timeoutMs: number = HEALTH_TIMEOUT_MS): Promise<{ status: string; mode: string; blueprintCount: number; mapCount: number } | null> {
   try {
-    const resp = await fetch(`${UE_BASE_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
+    const resp = await fetch(`${UE_BASE_URL}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!resp.ok) return null;
     return await resp.json() as any;
   } catch {
@@ -231,12 +245,21 @@ export async function ensureUE(): Promise<string | null> {
     return null;
   }
 
-  state.editorMode = false;
-
   // If another call is already starting the server, wait on the same promise
   if (state.startupPromise) {
     return state.startupPromise;
   }
+
+  // The first probe can fail simply because the editor's game thread is busy
+  // (compiling/loading). Re-confirm with a longer timeout before concluding it's
+  // down and spawning a competing commandlet (R-03).
+  const confirm = await getUEHealth(20000);
+  if (confirm) {
+    state.editorMode = confirm.mode === "editor";
+    return null;
+  }
+
+  state.editorMode = false;
 
   // Kill stuck process if any
   if (state.ueProcess) {

@@ -75,15 +75,16 @@ server.tool(
 
 ## ID chaining
 
-Tools that create or locate something put the ID in `refs`. Tools that consume it accept it as a string param. Convention:
+`refs` use the EXACT key the consuming tool accepts as input (ADR-009) so `refs.blueprint` feeds the next tool's `blueprint` param verbatim; the `<entity>Id` name is an alias.
 
-| Tool returns | Other tools consume as |
-|---|---|
-| `refs.blueprintId` | `blueprintId` param |
-| `refs.materialId` | `materialId` param |
-| `refs.actorId` | `actorId` param |
-| `refs.sequenceId` | `sequenceId` param |
-| `refs.mrqJobId` | `jobId` param (legacy name kept) |
+| Tool returns (primary) | + alias | Consumed by param |
+|---|---|---|
+| `refs.blueprint` | `blueprintId` | `blueprint` |
+| `refs.material` | `materialId` | `material` |
+| `refs.actorLabel` / `refs.label` | `actorId` | `actorLabel` / `label` |
+| `refs.graph` | `graphId` | `graph` |
+| `refs.nodeId` | — | `nodeId` |
+| `refs.assetPath` | `assetId` | `assetPath` |
 
 When designing a new tool, look at the call site flow:
 

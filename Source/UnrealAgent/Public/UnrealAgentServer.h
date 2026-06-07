@@ -351,6 +351,14 @@ private:
 	FString HandleSetGameView(const FString& Body);
 	FString HandleTakeScreenshot(const FString& Body);
 	FString HandleTakeHighResScreenshot(const FString& Body);
+	FString HandleCaptureScene(const FString& Body);
+
+	// ----- Presence / live-view (auto-reveal what the agent is editing) -----
+	FString HandleSetPresence(const FString& Body);
+	// When true, mutating a Blueprint opens its editor docked in the main window.
+	bool bAutoRevealAssets = true;
+	// Open the given Blueprint's editor as a docked tab (no-op unless bAutoRevealAssets).
+	void RevealBlueprintEditor(class UBlueprint* BP);
 
 	// ----- Output log / undo-redo / editor utils -----
 	FString HandleGetOutputLog(const FString& Body);
@@ -387,6 +395,14 @@ private:
 	// ----- Content browser -----
 	FString HandleNavigateContentBrowser(const FString& Body);
 	FString HandleOpenAssetEditor(const FString& Body);
+
+	// ----- Python -----
+	FString HandlePythonExec(const FString& Body);
+
+	// ----- Context / capability tools -----
+	FString HandleListAssets(const FString& Body);
+	FString HandleSetComponentDefault(const FString& Body);
+	FString HandleConnectAnimEntry(const FString& Body);
 
 	// ----- Serialization -----
 	TSharedRef<FJsonObject> SerializeBlueprint(UBlueprint* BP);

@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
-import { TYPE_NAME_DOCS, formatUpdatedState } from "../helpers.js";
+import { TYPE_NAME_DOCS } from "../helpers.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerVariableTools(server: McpServer): void {
   server.tool(
@@ -22,48 +23,25 @@ export function registerVariableTools(server: McpServer): void {
     },
     async ({ blueprint, variable, newType, typeCategory, dryRun, batch }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = batch
         ? { batch }
         : { blueprint, variable, newType, typeCategory };
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/change-variable-type", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-
-      if (data.results) {
-        // Batch response
-        lines.push(`Batch variable type change: ${data.results.length} operation(s)`);
-        for (const r of data.results) {
-          if (r.error) {
-            lines.push(`  FAILED ${r.blueprint}.${r.variable}: ${r.error}`);
-          } else {
-            lines.push(`  OK ${r.blueprint}.${r.variable} \u2192 ${r.newType}`);
-          }
-        }
-      } else {
-        lines.push(`Variable type changed successfully.`);
-        lines.push(`Blueprint: ${data.blueprint}`);
-        lines.push(`Variable: ${data.variable}`);
-        lines.push(`New type: ${data.newType} (${data.typeCategory})`);
-        lines.push(`Saved: ${data.saved}`);
+      try {
+        const data = await uePost("/api/change-variable-type", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : [
+            "run refresh_all_nodes to update all nodes in the Blueprint",
+            "check Break/Make struct nodes \u2014 they may need change_struct_node_type",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      // Updated state (#11)
-      lines.push(...formatUpdatedState(data));
-
-      // Tool chaining hints (#12)
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Run refresh_all_nodes to update all nodes in the Blueprint`);
-        lines.push(`  2. Check Break/Make struct nodes \u2014 they may need change_struct_node_type`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -87,22 +65,18 @@ export function registerVariableTools(server: McpServer): void {
       if (isArray !== undefined) body.isArray = isArray;
       if (defaultValue !== undefined) body.defaultValue = defaultValue;
 
-      const data = await uePost("/api/add-variable", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Variable added successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Variable: ${data.variableName}`);
-      lines.push(`Type: ${data.variableType}${data.isArray ? " (Array)" : ""}`);
-      if (data.category) lines.push(`Category: ${data.category}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  add_node(blueprint="${blueprint}", graph="EventGraph", nodeType="VariableGet", variableName="${variableName}") — read the variable`);
-      lines.push(`  add_node(blueprint="${blueprint}", graph="EventGraph", nodeType="VariableSet", variableName="${variableName}") — write the variable`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/add-variable", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `add_node(blueprint="${blueprint}", nodeType="VariableGet", variableName="${variableName}") to read it`,
+            `add_node(blueprint="${blueprint}", nodeType="VariableSet", variableName="${variableName}") to write it`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -117,22 +91,12 @@ export function registerVariableTools(server: McpServer): void {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
-      const data = await uePost("/api/remove-variable", { blueprint, variableName });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableVariables?.length) {
-          msg += `\nAvailable variables: ${data.availableVariables.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/remove-variable", { blueprint, variableName });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Variable removed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Variable: ${data.variableName}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -162,35 +126,12 @@ export function registerVariableTools(server: McpServer): void {
       if (editability !== undefined) body.editability = editability;
       if (isPrivate !== undefined) body.isPrivate = isPrivate;
 
-      const data = await uePost("/api/set-variable-metadata", body);
-
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableVariables?.length) {
-          msg += `\nAvailable variables: ${data.availableVariables.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/set-variable-metadata", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Variable metadata updated successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Variable: ${data.variable}`);
-
-      if (data.changes?.length) {
-        lines.push(`\nChanges:`);
-        for (const c of data.changes) {
-          if (c.oldValue !== undefined) {
-            lines.push(`  ${c.field}: ${c.oldValue} -> ${c.newValue}`);
-          } else {
-            lines.push(`  ${c.field}: ${c.newValue}`);
-          }
-        }
-      }
-
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

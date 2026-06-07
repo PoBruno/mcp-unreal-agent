@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerUndoRedoTools(server: McpServer): void {
   server.tool(
@@ -9,21 +10,20 @@ export function registerUndoRedoTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/undo", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Undone: ${data.undoneAction || "(unnamed action)"}`,
-        `Remaining undo actions: ${data.remainingUndoCount}`,
-        `Available redo actions: ${data.redoCount}`,
-        `\nNext steps:`,
-        `  1. Use redo to re-apply the undone action`,
-        `  2. Use undo again to undo further`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/undo", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use redo to re-apply the undone action",
+            "use undo again to undo further",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -33,21 +33,20 @@ export function registerUndoRedoTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/redo", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Redone: ${data.redoneAction || "(unnamed action)"}`,
-        `Available undo actions: ${data.undoCount}`,
-        `Remaining redo actions: ${data.remainingRedoCount}`,
-        `\nNext steps:`,
-        `  1. Use undo to undo the redone action`,
-        `  2. Use redo again to redo further`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/redo", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use undo to undo the redone action",
+            "use redo again to redo further",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -59,21 +58,21 @@ export function registerUndoRedoTools(server: McpServer): void {
     },
     async ({ description }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/begin-transaction", { description });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Transaction started: '${data.description}'`,
-        `Transaction index: ${data.transactionIndex}`,
-        `\nNext steps:`,
-        `  1. Make your modifications (set_actor_transform, set_actor_property, etc.)`,
-        `  2. Call end_transaction to close the transaction`,
-        `  3. The entire group can then be undone with a single undo call`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/begin-transaction", { description });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "make your modifications (set_actor_transform, set_actor_property, etc.)",
+            "call end_transaction to close the transaction",
+            "the entire group can then be undone with a single undo call",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -83,19 +82,19 @@ export function registerUndoRedoTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/end-transaction", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Transaction ended`,
-        `Transaction index: ${data.transactionIndex}`,
-        `\nNext steps:`,
-        `  1. Use undo to undo the entire transaction as one action`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/end-transaction", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use undo to undo the entire transaction as one action",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

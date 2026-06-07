@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerDiscoveryTools(server: McpServer): void {
   server.tool(
@@ -13,48 +14,14 @@ export function registerDiscoveryTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId, pinName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/get-pin-info", { blueprint, nodeId, pinName });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availablePins?.length) {
-          msg += `\n\nAvailable pins:`;
-          for (const p of data.availablePins) {
-            msg += `\n  ${p.direction === "Output" ? "\u2192" : "\u2190"} ${p.name}: ${p.type}`;
-          }
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/get-pin-info", { blueprint, nodeId, pinName });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Pin: ${data.pinName}`);
-      lines.push(`Direction: ${data.direction}`);
-      lines.push(`Type: ${data.type}${data.subtype ? ` (${data.subtype})` : ""}${data.subCategory ? ` [${data.subCategory}]` : ""}`);
-
-      const containers: string[] = [];
-      if (data.isArray) containers.push("Array");
-      if (data.isSet) containers.push("Set");
-      if (data.isMap) containers.push("Map");
-      if (containers.length) lines.push(`Container: ${containers.join(", ")}`);
-
-      if (data.isReference) lines.push(`Reference: true`);
-      if (data.isConst) lines.push(`Const: true`);
-
-      if (data.defaultValue !== undefined) lines.push(`Default value: ${data.defaultValue}`);
-      if (data.defaultTextValue !== undefined) lines.push(`Default text: ${data.defaultTextValue}`);
-      if (data.defaultObject !== undefined) lines.push(`Default object: ${data.defaultObject}`);
-
-      if (data.connectedTo?.length) {
-        lines.push(`\nConnections (${data.connectedTo.length}):`);
-        for (const c of data.connectedTo) {
-          lines.push(`  ${c.nodeTitle} (${c.nodeId}).${c.pinName}`);
-        }
-      } else {
-        lines.push(`\nConnections: none`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -70,23 +37,16 @@ export function registerDiscoveryTools(server: McpServer): void {
     },
     async ({ blueprint, sourceNodeId, sourcePinName, targetNodeId, targetPinName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/check-pin-compatibility", {
-        blueprint, sourceNodeId, sourcePinName, targetNodeId, targetPinName,
-      });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      const icon = data.compatible ? "\u2705" : "\u274c";
-      lines.push(`${icon} Compatible: ${data.compatible}`);
-      lines.push(`Connection type: ${data.connectionType}`);
-      if (data.message) lines.push(`Message: ${data.message}`);
-      lines.push(``);
-      lines.push(`Source pin type: ${data.sourcePinType}${data.sourcePinSubtype ? ` (${data.sourcePinSubtype})` : ""}`);
-      lines.push(`Target pin type: ${data.targetPinType}${data.targetPinSubtype ? ` (${data.targetPinSubtype})` : ""}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/check-pin-compatibility", {
+          blueprint, sourceNodeId, sourcePinName, targetNodeId, targetPinName,
+        });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -100,32 +60,19 @@ export function registerDiscoveryTools(server: McpServer): void {
     },
     async ({ filter, parentClass, limit }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = {};
       if (filter) body.filter = filter;
       if (parentClass) body.parentClass = parentClass;
       if (limit !== undefined) body.limit = limit;
 
-      const data = await uePost("/api/list-classes", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (data.truncated) {
-        lines.push(`Showing ${data.count} of ${data.totalMatched} matching classes (limit: ${data.limit}).\n`);
-      } else {
-        lines.push(`Found ${data.count} classes.\n`);
+      try {
+        const data = await uePost("/api/list-classes", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      for (const cls of data.classes) {
-        const tags: string[] = [];
-        if (cls.isBlueprint) tags.push("BP");
-        if (cls.flags?.length) tags.push(...cls.flags);
-        const tagStr = tags.length ? ` [${tags.join(", ")}]` : "";
-        lines.push(`${cls.name}${tagStr} : ${cls.parentClass || "none"}`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -138,47 +85,17 @@ export function registerDiscoveryTools(server: McpServer): void {
     },
     async ({ className, filter }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { className };
       if (filter) body.filter = filter;
 
-      const data = await uePost("/api/list-functions", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`${data.className}: ${data.count} callable functions.\n`);
-
-      for (const fn of data.functions) {
-        const tags: string[] = [];
-        if (fn.isPure) tags.push("pure");
-        if (fn.isStatic) tags.push("static");
-        if (fn.isEvent) tags.push("event");
-        if (fn.isConst) tags.push("const");
-        const tagStr = tags.length ? ` [${tags.join(", ")}]` : "";
-
-        const params = fn.parameters
-          .filter((p: any) => !p.isOutput)
-          .map((p: any) => `${p.name}: ${p.type}`)
-          .join(", ");
-        const outParams = fn.parameters
-          .filter((p: any) => p.isOutput)
-          .map((p: any) => `${p.name}: ${p.type}`)
-          .join(", ");
-
-        let sig = `${fn.name}(${params})`;
-        if (fn.returnType) sig += ` -> ${fn.returnType}`;
-        if (outParams) sig += ` [out: ${outParams}]`;
-        sig += tagStr;
-
-        if (fn.definedIn && fn.definedIn !== data.className) {
-          sig += ` (from ${fn.definedIn})`;
-        }
-
-        lines.push(sig);
+      try {
+        const data = await uePost("/api/list-functions", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -191,27 +108,17 @@ export function registerDiscoveryTools(server: McpServer): void {
     },
     async ({ className, filter }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { className };
       if (filter) body.filter = filter;
 
-      const data = await uePost("/api/list-properties", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`${data.className}: ${data.count} properties.\n`);
-
-      for (const prop of data.properties) {
-        const flagStr = prop.flags?.length ? ` [${prop.flags.join(", ")}]` : "";
-        let line = `${prop.name}: ${prop.type}${flagStr}`;
-        if (prop.definedIn && prop.definedIn !== data.className) {
-          line += ` (from ${prop.definedIn})`;
-        }
-        lines.push(line);
+      try {
+        const data = await uePost("/api/list-properties", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

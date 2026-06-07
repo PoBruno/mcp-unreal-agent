@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerLevelActorTools(server: McpServer): void {
   server.tool(
@@ -15,21 +16,22 @@ export function registerLevelActorTools(server: McpServer): void {
     },
     async ({ childActor, parentActor, socketName, attachmentRule }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
       const body: Record<string, any> = { childActor, parentActor };
       if (socketName) body.socketName = socketName;
       if (attachmentRule) body.attachmentRule = attachmentRule;
-      const data = await uePost("/api/attach-actor", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-      const lines = [
-        `Attached '${data.childActor}' to '${data.parentActor}'`,
-        `Attachment rule: ${data.attachmentRule}`,
-      ];
-      if (data.socketName) lines.push(`Socket: ${data.socketName}`);
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use list_actors to verify the attachment hierarchy`);
-      lines.push(`  2. Use detach_actor to undo the attachment`);
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/attach-actor", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use list_actors to verify the attachment hierarchy",
+            "use detach_actor to undo the attachment",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -43,12 +45,21 @@ export function registerLevelActorTools(server: McpServer): void {
     },
     async ({ actorLabel, detachmentRule }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
       const body: Record<string, any> = { actorLabel };
       if (detachmentRule) body.detachmentRule = detachmentRule;
-      const data = await uePost("/api/detach-actor", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-      return { content: [{ type: "text" as const, text: `Detached '${data.actorLabel}' from '${data.previousParent}'\n\nNext steps:\n  1. Use list_actors to verify\n  2. Use set_actor_transform to reposition if needed` }] };
+      try {
+        const data = await uePost("/api/detach-actor", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use list_actors to verify",
+            "use set_actor_transform to reposition if needed",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -66,21 +77,22 @@ export function registerLevelActorTools(server: McpServer): void {
     },
     async ({ actorLabel, newLabel, offset }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
       const body: Record<string, any> = { actorLabel };
       if (newLabel) body.newLabel = newLabel;
       if (offset) body.offset = offset;
-      const data = await uePost("/api/duplicate-actor", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-      const lines = [
-        `Duplicated '${data.sourceActor}'`,
-        `New actor: ${data.newActorLabel} (${data.newActorClass})`,
-        `Location: (${data.location.x}, ${data.location.y}, ${data.location.z})`,
-        `\nNext steps:`,
-        `  1. Use set_actor_transform to reposition the duplicate`,
-        `  2. Use rename_actor to give it a meaningful name`,
-      ];
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/duplicate-actor", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use set_actor_transform to reposition the duplicate",
+            "use rename_actor to give it a meaningful name",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -93,10 +105,16 @@ export function registerLevelActorTools(server: McpServer): void {
     },
     async ({ actorLabel, newLabel }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
-      const data = await uePost("/api/rename-actor", { actorLabel, newLabel });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-      return { content: [{ type: "text" as const, text: `Renamed '${data.oldLabel}' to '${data.newLabel}' (${data.actorClass})\n\nNext steps:\n  1. Use list_actors to verify` }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
+      try {
+        const data = await uePost("/api/rename-actor", { actorLabel, newLabel });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["use list_actors to verify"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

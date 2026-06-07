@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerActorStateTools(server: McpServer): void {
   server.tool(
@@ -13,21 +14,19 @@ export function registerActorStateTools(server: McpServer): void {
     },
     async ({ actorLabel, mobility }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
-
-      const data = await uePost("/api/set-actor-mobility", { actorLabel, mobility });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Set mobility of '${data.actorLabel}'`,
-        `Previous: ${data.previousMobility}`,
-        `New: ${data.newMobility}`,
-        `\nNext steps:`,
-        `  1. Use list_actors to verify the change`,
-        `  2. Static actors cannot move at runtime — use Movable if the actor needs to move`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
+      try {
+        const data = await uePost("/api/set-actor-mobility", { actorLabel, mobility });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use list_actors to verify the change",
+            "static actors cannot move at runtime — use Movable if the actor needs to move",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -42,24 +41,23 @@ export function registerActorStateTools(server: McpServer): void {
     },
     async ({ actorLabel, visible, propagateToChildren }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { actorLabel, visible };
       if (propagateToChildren !== undefined) body.propagateToChildren = propagateToChildren;
 
-      const data = await uePost("/api/set-actor-visibility", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `${data.visible ? "Shown" : "Hidden"} actor '${data.actorLabel}'`,
-        `Was hidden: ${data.wasHidden}`,
-        `Propagated to children: ${data.propagatedToChildren}`,
-        `\nNext steps:`,
-        `  1. Use list_actors to see all actors and their visibility state`,
-        `  2. Use set_actor_visibility again to toggle back`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-actor-visibility", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use list_actors to see all actors and their visibility state",
+            "use set_actor_visibility again to toggle back",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -74,24 +72,23 @@ export function registerActorStateTools(server: McpServer): void {
     },
     async ({ actorLabel, simulatePhysics, enableGravity }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { actorLabel, simulatePhysics };
       if (enableGravity !== undefined) body.enableGravity = enableGravity;
 
-      const data = await uePost("/api/set-actor-physics", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `${data.simulatePhysics ? "Enabled" : "Disabled"} physics on '${data.actorLabel}'`,
-        `Was simulating: ${data.wasSimulating}`,
-        `Component: ${data.component}`,
-        `\nNext steps:`,
-        `  1. Use set_actor_mobility to change mobility if needed`,
-        `  2. Physics requires a collision-enabled primitive component (StaticMesh, etc.)`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-actor-physics", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use set_actor_mobility to change mobility if needed",
+            "physics requires a collision-enabled primitive component (StaticMesh, etc.)",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

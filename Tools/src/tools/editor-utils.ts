@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerEditorUtilityTools(server: McpServer): void {
   server.tool(
@@ -11,20 +12,20 @@ export function registerEditorUtilityTools(server: McpServer): void {
     },
     async ({ actorLabel }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/focus-actor", { actorLabel });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Focused on '${data.actorLabel}'`,
-        `Location: (${data.location.x}, ${data.location.y}, ${data.location.z})`,
-        `\nNext steps:`,
-        `  1. The actor is now selected and centered in the viewport`,
-        `  2. Use take_screenshot to capture the current view`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/focus-actor", { actorLabel });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "the actor is now selected and centered in the viewport",
+            "use take_screenshot to capture the current view",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -40,16 +41,18 @@ export function registerEditorUtilityTools(server: McpServer): void {
     },
     async ({ message, severity, duration }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { message };
       if (severity) body.severity = severity;
       if (duration !== undefined) body.duration = duration;
 
-      const data = await uePost("/api/editor-notification", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `Notification shown: "${data.message}" (${data.duration}s)` }] };
+      try {
+        const data = await uePost("/api/editor-notification", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -59,18 +62,19 @@ export function registerEditorUtilityTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/save-all", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        data.success ? "All dirty packages saved successfully." : "Save completed with some failures.",
-        `\nNext steps:`,
-        `  1. Use get_dirty_packages to verify no unsaved changes remain`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/save-all", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use get_dirty_packages to verify no unsaved changes remain",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -80,26 +84,19 @@ export function registerEditorUtilityTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/get-dirty-packages", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Unsaved packages: ${data.count}`);
-
-      if (data.packages && data.packages.length > 0) {
-        for (const pkg of data.packages) {
-          lines.push(`  - ${pkg.name}`);
-        }
-      } else {
-        lines.push("No unsaved changes.");
+      try {
+        const data = await uePost("/api/get-dirty-packages", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use save_all to save all dirty packages",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use save_all to save all dirty packages`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

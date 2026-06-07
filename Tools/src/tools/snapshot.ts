@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
-import { TYPE_NAME_DOCS, flagType } from "../helpers.js";
+import { TYPE_NAME_DOCS } from "../helpers.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerSnapshotTools(server: McpServer): void {
   server.tool(
@@ -13,32 +14,25 @@ export function registerSnapshotTools(server: McpServer): void {
     },
     async (params) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: `Error: ${err}` }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/snapshot-graph", {
-        blueprint: params.blueprint,
-        graph: params.graph,
-      });
-
-      if (data.error) {
-        return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      try {
+        const data = await uePost("/api/snapshot-graph", {
+          blueprint: params.blueprint,
+          graph: params.graph,
+        });
+        const refs = autoRefs(data);
+        if (typeof data?.snapshotId === "string") refs.snapshotId = data.snapshotId;
+        return toMcp(wrapRaw(data, {
+          refs,
+          nextSteps: [
+            "make your changes, then call diff_graph with refs.snapshotId to see what changed",
+            "call restore_graph with refs.snapshotId to reconnect severed pins",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Snapshot created: ${data.snapshotId}`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      if (data.graphs) {
-        const graphNames = data.graphs.map((g: any) => `${g.name} (${g.nodeCount} nodes, ${g.connectionCount} connections)`);
-        lines.push(`Graphs: ${graphNames.join(", ")}`);
-      }
-      lines.push(`Total connections captured: ${data.totalConnections}`);
-      lines.push(``);
-      lines.push(`**Next steps:**`);
-      lines.push(`1. Make your changes (C++ rebuild, change_struct_node_type, etc.)`);
-      lines.push(`2. Run **diff_graph** to see what changed`);
-      lines.push(`3. Run **restore_graph** to reconnect any severed pins`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -52,81 +46,24 @@ export function registerSnapshotTools(server: McpServer): void {
     },
     async (params) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: `Error: ${err}` }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/diff-graph", {
-        blueprint: params.blueprint,
-        snapshotId: params.snapshotId,
-        graph: params.graph,
-      });
-
-      if (data.error) {
-        return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      try {
+        const data = await uePost("/api/diff-graph", {
+          blueprint: params.blueprint,
+          snapshotId: params.snapshotId,
+          graph: params.graph,
+        });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "call restore_graph to reconnect severed pins, or change_struct_node_type to fix type changes first",
+            "call validate_blueprint to verify clean compilation",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`# Diff: ${data.blueprint} vs ${data.snapshotId}`);
-
-      // Per-graph diffs
-      if (data.graphDiffs) {
-        for (const gd of data.graphDiffs) {
-          lines.push(``);
-          lines.push(`## ${gd.graphName}`);
-
-          if (gd.severedConnections?.length) {
-            lines.push(`  Severed connections (${gd.severedConnections.length}):`);
-            for (const sc of gd.severedConnections) {
-              lines.push(`    ${sc.sourceNodeTitle}.${sc.sourcePinName} was -> ${sc.targetNodeTitle}.${sc.targetPinName}`);
-            }
-          }
-
-          if (gd.newConnections?.length) {
-            lines.push(`  New connections (${gd.newConnections.length}):`);
-            for (const nc of gd.newConnections) {
-              lines.push(`    ${nc.sourceNodeTitle}.${nc.sourcePinName} -> ${nc.targetNodeTitle}.${nc.targetPinName}`);
-            }
-          }
-
-          if (gd.typeChanges?.length) {
-            lines.push(`  Type changes (${gd.typeChanges.length}):`);
-            for (const tc of gd.typeChanges) {
-              lines.push(`    Node ${tc.nodeId} (${tc.nodeTitle}): ${tc.oldType} -> ${tc.newType}`);
-            }
-          }
-
-          if (gd.missingNodes?.length) {
-            lines.push(`  Missing nodes (${gd.missingNodes.length}):`);
-            for (const mn of gd.missingNodes) {
-              lines.push(`    ${mn.nodeId} (${mn.nodeTitle}) - was ${mn.nodeClass}`);
-            }
-          }
-
-          if (!gd.severedConnections?.length && !gd.newConnections?.length && !gd.typeChanges?.length && !gd.missingNodes?.length) {
-            lines.push(`  No changes detected.`);
-          }
-        }
-      }
-
-      // Summary
-      lines.push(``);
-      if (data.summary) {
-        lines.push(`Summary: ${data.summary.severed} severed, ${data.summary.new} new, ${data.summary.typeChanges} type changes, ${data.summary.missingNodes} missing nodes`);
-      }
-
-      // Next steps based on what was found
-      lines.push(``);
-      lines.push(`**Next steps:**`);
-      if (data.summary?.typeChanges > 0) {
-        lines.push(`1. Fix type changes first with **change_struct_node_type**`);
-        lines.push(`2. Then run **restore_graph** to reconnect severed pins`);
-      } else if (data.summary?.severed > 0) {
-        lines.push(`1. Run **restore_graph** to reconnect severed pins`);
-      } else {
-        lines.push(`1. No action needed — graph is intact`);
-      }
-      lines.push(`3. Run **validate_blueprint** to verify clean compilation`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -146,63 +83,29 @@ export function registerSnapshotTools(server: McpServer): void {
     },
     async (params) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: `Error: ${err}` }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/restore-graph", {
-        blueprint: params.blueprint,
-        snapshotId: params.snapshotId,
-        graph: params.graph,
-        nodeId: params.nodeId,
-        pinMap: params.pinMap,
-        dryRun: params.dryRun ?? false,
-      });
-
-      if (data.error) {
-        return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      try {
+        const data = await uePost("/api/restore-graph", {
+          blueprint: params.blueprint,
+          snapshotId: params.snapshotId,
+          graph: params.graph,
+          nodeId: params.nodeId,
+          pinMap: params.pinMap,
+          dryRun: params.dryRun ?? false,
+        });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: params.dryRun
+            ? ["re-run restore_graph without dryRun to apply changes"]
+            : [
+                "call validate_blueprint to verify clean compilation",
+                "call find_disconnected_pins to verify no pins were missed",
+              ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      if (params.dryRun) {
-        lines.push(`[DRY RUN - no changes will be made]\n`);
-      }
-
-      lines.push(`Restore: ${data.blueprint} from ${data.snapshotId}`);
-      if (params.nodeId) {
-        lines.push(`Scoped to node: ${params.nodeId}`);
-      }
-      lines.push(``);
-      lines.push(`Reconnected: ${data.reconnected}/${data.reconnected + data.failed}`);
-      if (data.failed > 0) {
-        lines.push(`Failed: ${data.failed}`);
-      }
-
-      if (data.details?.length) {
-        lines.push(``);
-        lines.push(`Details:`);
-        for (const d of data.details) {
-          const status = d.result === "ok" ? "OK" : "FAILED";
-          const reason = d.reason ? ` (${d.reason})` : "";
-          lines.push(`  ${status}: ${d.sourcePinName} -> ${d.targetNodeTitle}.${d.targetPinName}${reason}`);
-        }
-      }
-
-      if (!params.dryRun && data.saved !== undefined) {
-        lines.push(``);
-        lines.push(`Saved: ${data.saved}`);
-      }
-
-      lines.push(``);
-      lines.push(`**Next steps:**`);
-      if (data.failed > 0) {
-        lines.push(`1. Fix ${data.failed} failed reconnection(s) manually with **connect_pins**`);
-      }
-      if (params.dryRun) {
-        lines.push(`1. Re-run **restore_graph** without dryRun to apply changes`);
-      }
-      lines.push(`2. Run **validate_blueprint** to verify clean compilation`);
-      lines.push(`3. Run **find_disconnected_pins** to verify no pins were missed`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -217,71 +120,26 @@ export function registerSnapshotTools(server: McpServer): void {
     },
     async (params) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: `Error: ${err}` }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/find-disconnected-pins", {
-        blueprint: params.blueprint,
-        filter: params.filter,
-        snapshotId: params.snapshotId,
-        sensitivity: params.sensitivity ?? "medium",
-      });
-
-      if (data.error) {
-        return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      try {
+        const data = await uePost("/api/find-disconnected-pins", {
+          blueprint: params.blueprint,
+          filter: params.filter,
+          snapshotId: params.snapshotId,
+          sensitivity: params.sensitivity ?? "medium",
+        });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "call change_struct_node_type to restore struct types on HIGH-confidence issues",
+            "call restore_graph (if a snapshot exists) or connect_pins to reconnect severed pins",
+            "call validate_blueprint to verify compilation",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-
-      if (!data.results || data.results.length === 0) {
-        lines.push(`No disconnected pins found.`);
-        if (data.summary) {
-          lines.push(`Scanned ${data.summary.blueprintsScanned} Blueprint(s) — all Break/Make struct nodes have valid types and connected outputs.`);
-        }
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      }
-
-      // Group by blueprint
-      const byBP: Record<string, any[]> = {};
-      for (const r of data.results) {
-        const bp = r.blueprint || params.blueprint || "unknown";
-        if (!byBP[bp]) byBP[bp] = [];
-        byBP[bp].push(r);
-      }
-
-      lines.push(`Disconnected pins found:\n`);
-
-      for (const [bp, results] of Object.entries(byBP)) {
-        lines.push(`## ${bp}`);
-        for (const r of results) {
-          const conf = r.confidence === "high" ? "HIGH" : r.confidence === "medium" ? "MEDIUM" : "LOW";
-          const icon = r.confidence === "high" ? "\u26A0" : r.confidence === "medium" ? "\u26A1" : "\u2139";
-          lines.push(`  ${icon} ${conf} — ${r.nodeTitle || "BreakStruct"} (${r.nodeId}) in ${r.graph}`);
-          lines.push(`    Type: ${flagType(r.structType || "")}`);
-          lines.push(`    Reason: ${r.reason}`);
-          if (r.pins?.length) {
-            for (const p of r.pins) {
-              const was = p.wasConnectedTo ? ` (was -> ${p.wasConnectedTo})` : "";
-              lines.push(`      ${p.name}: ${p.type} — disconnected${was}`);
-            }
-          }
-        }
-        lines.push(``);
-      }
-
-      if (data.summary) {
-        lines.push(`Summary: ${data.summary.high} HIGH, ${data.summary.medium} MEDIUM across ${data.summary.blueprintsScanned} Blueprint(s)`);
-      }
-
-      lines.push(``);
-      lines.push(`**Next steps:**`);
-      if (data.summary?.high > 0) {
-        lines.push(`1. Fix HIGH-confidence issues: use **change_struct_node_type** to restore struct types`);
-      }
-      lines.push(`2. Use **restore_graph** (if snapshot exists) to bulk-reconnect severed pins`);
-      lines.push(`3. Or use **connect_pins** for individual reconnections`);
-      lines.push(`4. Run **validate_blueprint** to verify compilation`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -294,62 +152,23 @@ export function registerSnapshotTools(server: McpServer): void {
     },
     async (params) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: `Error: ${err}` }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/analyze-rebuild-impact", {
-        moduleName: params.moduleName,
-        structNames: params.structNames,
-      });
-
-      if (data.error) {
-        return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      try {
+        const data = await uePost("/api/analyze-rebuild-impact", {
+          moduleName: params.moduleName,
+          structNames: params.structNames,
+        });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "call snapshot_graph on each HIGH-risk Blueprint before rebuilding",
+            "after rebuild, call find_disconnected_pins to assess damage, then restore_graph to reconnect",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`# Rebuild Impact Analysis: ${data.moduleName}`);
-      lines.push(``);
-
-      if (data.typesFound?.length) {
-        lines.push(`Types in module (${data.typesFound.length}): ${data.typesFound.join(", ")}`);
-        lines.push(``);
-      }
-
-      if (!data.affectedBlueprints?.length) {
-        lines.push(`No Blueprints reference types from this module.`);
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      }
-
-      lines.push(`Affected Blueprints (${data.affectedBlueprints.length}):\n`);
-
-      for (const bp of data.affectedBlueprints) {
-        const risk = bp.risk || "UNKNOWN";
-        lines.push(`  **${bp.name}** (${risk} risk)`);
-        if (bp.breakNodes > 0) lines.push(`    Break nodes: ${bp.breakNodes}${bp.breakNodeTypes ? ` (${bp.breakNodeTypes.join(", ")})` : ""}`);
-        if (bp.makeNodes > 0) lines.push(`    Make nodes: ${bp.makeNodes}${bp.makeNodeTypes ? ` (${bp.makeNodeTypes.join(", ")})` : ""}`);
-        if (bp.variables > 0) lines.push(`    Variables: ${bp.variables}`);
-        if (bp.functionParams > 0) lines.push(`    Function params: ${bp.functionParams}`);
-        if (bp.connectionsAtRisk > 0) lines.push(`    Connections at risk: ~${bp.connectionsAtRisk}`);
-        lines.push(``);
-      }
-
-      if (data.summary) {
-        lines.push(`Total: ${data.summary.totalBlueprints} Blueprints, ${data.summary.totalBreakMakeNodes} Break/Make nodes, ~${data.summary.totalConnectionsAtRisk} connections at risk`);
-      }
-
-      lines.push(``);
-      lines.push(`**Next steps:**`);
-      lines.push(`1. Run **snapshot_graph** on each HIGH-risk Blueprint BEFORE rebuilding:`);
-      const highRisk = (data.affectedBlueprints || []).filter((bp: any) => bp.risk === "HIGH");
-      for (const bp of highRisk.slice(0, 5)) {
-        lines.push(`   snapshot_graph(blueprint="${bp.name}")`);
-      }
-      if (highRisk.length > 5) {
-        lines.push(`   ... and ${highRisk.length - 5} more`);
-      }
-      lines.push(`2. After rebuild, run **find_disconnected_pins** to assess damage`);
-      lines.push(`3. Use **restore_graph** on each Blueprint to reconnect severed pins`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

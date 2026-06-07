@@ -4,6 +4,7 @@
 #include "IContentBrowserSingleton.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "Settings/EditorStyleSettings.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonWriter.h"
@@ -106,13 +107,24 @@ FString FUnrealAgentServer::HandleOpenAssetEditor(const FString& Body)
 		return MakeErrorJson(TEXT("AssetEditorSubsystem not available."));
 	}
 
+	// Always dock the asset editor as a TAB in the main window — never float a new
+	// window (the open location otherwise depends on user prefs / docking history).
+	// The AssetEditorSubsystem reads this preference when opening the toolkit.
+	UEditorStyleSettings* StyleSettings = GetMutableDefault<UEditorStyleSettings>();
+	EAssetEditorOpenLocation PreviousLocation = StyleSettings->AssetEditorOpenLocation;
+	StyleSettings->AssetEditorOpenLocation = EAssetEditorOpenLocation::MainWindow;
+
 	bool bOpened = AssetEditorSubsystem->OpenEditorForAsset(Asset);
+
+	// Restore the user's preference so we don't permanently change their settings.
+	StyleSettings->AssetEditorOpenLocation = PreviousLocation;
 
 	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetBoolField(TEXT("success"), bOpened);
 	Result->SetStringField(TEXT("assetName"), AssetData->AssetName.ToString());
 	Result->SetStringField(TEXT("assetPath"), AssetData->PackageName.ToString());
 	Result->SetStringField(TEXT("assetClass"), AssetData->AssetClassPath.GetAssetName().ToString());
+	Result->SetStringField(TEXT("openLocation"), TEXT("MainWindow (docked tab)"));
 
 	if (!bOpened)
 	{

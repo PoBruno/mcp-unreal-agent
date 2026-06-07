@@ -31,11 +31,13 @@ public class UnrealAgent : ModuleRules
 			"AnimGraph",
 			"AnimGraphRuntime",
 			"RHI",
+			"RenderCore",
 			"Slate",
 			"UMG",
 			"UMGEditor",
 			"SlateCore",
-			"HairStrandsCore"
+			"HairStrandsCore",
+			"PythonScriptPlugin"
 		});
 	}
 }

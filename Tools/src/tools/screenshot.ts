@@ -69,4 +69,34 @@ export function registerScreenshotTools(server: McpServer): void {
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
+
+  server.tool(
+    "capture_scene",
+    "Render the scene OFFSCREEN via a SceneCapture2D and save a PNG. Works even when the editor window isn't focused (unlike take_screenshot, which depends on the on-screen viewport). Specify camera location/rotation to frame what you want. Use this to see the actual 3D scene.",
+    {
+      location: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional()
+        .describe("Capture camera world position (default 900,900,600)"),
+      rotation: z.object({ pitch: z.number(), yaw: z.number(), roll: z.number().optional() }).optional()
+        .describe("Capture camera rotation in degrees (default pitch -25, yaw -135)"),
+      width: z.number().optional().describe("Image width (default 1280)"),
+      height: z.number().optional().describe("Image height (default 720)"),
+      filename: z.string().optional().describe("Output filename (without path). Defaults to 'SceneCapture_<timestamp>.png'"),
+    },
+    async ({ location, rotation, width, height, filename }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const body: Record<string, any> = {};
+      if (location) body.location = location;
+      if (rotation) body.rotation = rotation;
+      if (width !== undefined) body.width = width;
+      if (height !== undefined) body.height = height;
+      if (filename) body.filename = filename;
+
+      const data = await uePost("/api/capture-scene", body);
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+
+      return { content: [{ type: "text" as const, text: `Scene captured: ${data.fullPath} (${data.width}x${data.height})` }] };
+    }
+  );
 }

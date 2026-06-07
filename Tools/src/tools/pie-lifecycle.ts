@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerPIELifecycleTools(server: McpServer): void {
   server.tool(
@@ -9,21 +10,21 @@ export function registerPIELifecycleTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/start-pie", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `PIE session started.`,
-        `  Status: ${data.status}`,
-        `\nNext steps:`,
-        `  1. Use is_pie_running to check when the session is fully active`,
-        `  2. Use pie_pause to pause/unpause execution`,
-        `  3. Use stop_pie to end the session`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/start-pie", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use is_pie_running to check when the session is fully active",
+            "use pie_pause to pause/unpause execution",
+            "use stop_pie to end the session",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -33,12 +34,14 @@ export function registerPIELifecycleTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/stop-pie", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `PIE session stopped. ${data.status}` }] };
+      try {
+        const data = await uePost("/api/stop-pie", {});
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -48,16 +51,14 @@ export function registerPIELifecycleTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/is-pie-running", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const status = data.running
-        ? (data.paused ? "Running (PAUSED)" : "Running")
-        : "Not running";
-
-      return { content: [{ type: "text" as const, text: `PIE status: ${status}` }] };
+      try {
+        const data = await uePost("/api/is-pie-running", {});
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -69,12 +70,14 @@ export function registerPIELifecycleTools(server: McpServer): void {
     },
     async ({ paused }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/pie-pause", { paused });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `PIE ${data.paused ? "paused" : "unpaused"}.` }] };
+      try {
+        const data = await uePost("/api/pie-pause", { paused });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

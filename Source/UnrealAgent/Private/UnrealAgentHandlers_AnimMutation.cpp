@@ -762,6 +762,12 @@ FString FUnrealAgentServer::HandleAddAnimNode(const FString& Body)
 		SMNode->CreateNewGuid();
 		SMNode->PostPlacedNewNode();
 		SMNode->AllocateDefaultPins();
+		// R-07: honor a requested name for the state machine's bound graph.
+		FString SMName;
+		if (Json->TryGetStringField(TEXT("name"), SMName) && !SMName.IsEmpty() && SMNode->EditorStateMachineGraph)
+		{
+			FBlueprintEditorUtils::RenameGraph(SMNode->EditorStateMachineGraph, SMName);
+		}
 		NewNode = SMNode;
 	}
 	else
@@ -780,6 +786,46 @@ FString FUnrealAgentServer::HandleAddAnimNode(const FString& Body)
 	NewNode->NodePosY = PosY;
 	TargetGraph->AddNode(NewNode, false, false);
 	NewNode->SetFlags(RF_Transactional);
+
+	// R-08: wire the state machine's output pose to the AnimGraph Output Pose (root)
+	// so the Animation Blueprint actually outputs a pose (otherwise it's "ignored").
+	if (NodeType == TEXT("StateMachine"))
+	{
+		UEdGraphNode* RootNode = nullptr;
+		for (UEdGraphNode* Node : TargetGraph->Nodes)
+		{
+			if (Node && Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_Root")))
+			{
+				RootNode = Node;
+				break;
+			}
+		}
+		if (RootNode)
+		{
+			UEdGraphPin* OutPin = nullptr;
+			for (UEdGraphPin* Pin : NewNode->Pins)
+			{
+				if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
+				{
+					OutPin = Pin;
+					break;
+				}
+			}
+			UEdGraphPin* RootInPin = nullptr;
+			for (UEdGraphPin* Pin : RootNode->Pins)
+			{
+				if (Pin && Pin->Direction == EGPD_Input && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct)
+				{
+					RootInPin = Pin;
+					break;
+				}
+			}
+			if (OutPin && RootInPin)
+			{
+				OutPin->MakeLinkTo(RootInPin);
+			}
+		}
+	}
 
 	// Compile and save
 	FKismetEditorUtilities::CompileBlueprint(AnimBP);
@@ -838,6 +884,7 @@ FString FUnrealAgentServer::HandleAddStateMachine(const FString& Body)
 	ForwardJson->SetStringField(TEXT("blueprint"), BlueprintName);
 	ForwardJson->SetStringField(TEXT("graph"), TEXT("AnimGraph"));
 	ForwardJson->SetStringField(TEXT("nodeType"), TEXT("StateMachine"));
+	ForwardJson->SetStringField(TEXT("name"), MachineName); // R-07: pass through the requested name
 	if (Json->HasField(TEXT("posX")))
 		ForwardJson->SetNumberField(TEXT("posX"), Json->GetNumberField(TEXT("posX")));
 	if (Json->HasField(TEXT("posY")))
@@ -1614,6 +1661,61 @@ FString FUnrealAgentServer::HandleSetStateBlendSpace(const FString& Body)
 	Result->SetStringField(TEXT("stateName"), StateName);
 	Result->SetStringField(TEXT("blendSpace"), BlendSpaceAsset->GetName());
 	Result->SetStringField(TEXT("nodeId"), BSNode->NodeGuid.ToString());
+	Result->SetBoolField(TEXT("saved"), bSaved);
+	return JsonToString(Result);
+}
+
+// ============================================================
+// HandleConnectAnimEntry — connect the state machine ENTRY to a state so the
+// machine actually outputs a pose (the entry isn't auto-connected on add_anim_state).
+// ============================================================
+
+FString FUnrealAgentServer::HandleConnectAnimEntry(const FString& Body)
+{
+	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
+	if (!Json.IsValid()) { return MakeErrorJson(TEXT("Invalid JSON body")); }
+
+	FString BlueprintName = Json->GetStringField(TEXT("blueprint"));
+	FString GraphName = Json->GetStringField(TEXT("graph"));
+	FString StateName = Json->GetStringField(TEXT("stateName"));
+	if (BlueprintName.IsEmpty() || GraphName.IsEmpty() || StateName.IsEmpty())
+	{
+		return MakeErrorJson(TEXT("Missing required fields: blueprint, graph, stateName"));
+	}
+
+	FString LoadError;
+	UBlueprint* BP = LoadBlueprintByName(BlueprintName, LoadError);
+	if (!BP) { return MakeErrorJson(LoadError); }
+	if (!Cast<UAnimBlueprint>(BP)) { return MakeErrorJson(FString::Printf(TEXT("'%s' is not an Animation Blueprint"), *BlueprintName)); }
+
+	UAnimationStateMachineGraph* SMGraph = FindStateMachineGraph(BP, GraphName);
+	if (!SMGraph) { return MakeErrorJson(FString::Printf(TEXT("State machine graph '%s' not found"), *GraphName)); }
+
+	UAnimStateNode* StateNode = FindStateByName(SMGraph, StateName);
+	if (!StateNode) { return MakeErrorJson(FString::Printf(TEXT("State '%s' not found in '%s'"), *StateName, *GraphName)); }
+
+	UAnimStateEntryNode* Entry = nullptr;
+	for (UEdGraphNode* Node : SMGraph->Nodes)
+	{
+		if (UAnimStateEntryNode* E = Cast<UAnimStateEntryNode>(Node)) { Entry = E; break; }
+	}
+	if (!Entry) { return MakeErrorJson(TEXT("State machine has no entry node")); }
+
+	UEdGraphPin* EntryOut = Entry->GetOutputPin();
+	UEdGraphPin* StateIn = StateNode->GetInputPin();
+	if (!EntryOut || !StateIn) { return MakeErrorJson(TEXT("Could not find entry/state pins")); }
+
+	EntryOut->BreakAllPinLinks();
+	EntryOut->MakeLinkTo(StateIn);
+
+	BP->Modify();
+	const bool bSaved = SaveBlueprintPackage(BP);
+
+	TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("success"), true);
+	Result->SetStringField(TEXT("blueprint"), BlueprintName);
+	Result->SetStringField(TEXT("graph"), GraphName);
+	Result->SetStringField(TEXT("entryState"), StateName);
 	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }

@@ -215,3 +215,60 @@ Upstream `ue5-mcp` is AI-only. That intentionally excludes a large portion of th
 ### Consequences
 - Code review must catch both human and AI failure modes. AI: shallow fixes that miss invariants, hallucinated API names. Human: scope creep, style drift.
 - PR template will ask for AI disclosure.
+
+---
+
+## ADR-008: Context is layered/budgeted, never a full dump
+
+**Status:** Accepted
+**Date:** 2026-06-07
+
+### Problem
+Agents need context before acting on an asset. The tempting design is "one tool that
+returns the complete JSON of everything." A raw Blueprint dump is 300K+ chars — it
+blows the context window, dilutes attention (LLMs reason worse with huge irrelevant
+context), goes stale as the agent mutates, and is unbounded for levels/large assets.
+Research on tool design for agents converges on progressive disclosure + token budgets.
+
+### Decision
+Context tools return a **budgeted MAP** — counts, names, one-line summaries — plus
+`refs` to drill into, never the raw payload inlined. `inspect(target, include?, depth?)`
+defaults to `summary` (~1-3K chars); `depth: "full"` opts into per-section detail.
+`get_edit_context(target, operation)` returns only the blast radius of an edit. The
+summary renderers (`get_blueprint_summary`, `describe_graph`, `describe_material`) put
+their COMPACT summary in `data`, not the raw payload (a regression from the contract
+migration that this ADR reverses). All aggregates enforce truncation with explicit
+"N more — call X" markers.
+
+### Alternatives rejected
+- **One mega "give me everything" tool.** Token bomb, attention dilution, staleness.
+- **Only granular tools.** High orchestration overhead; easy to miss context.
+
+### Consequences
+- `inspect`/`get_edit_context` are TS aggregators over existing endpoints; budget +
+  truncation are mandatory.
+- New aggregate sections must default to summary depth and emit refs.
+
+---
+
+## ADR-009: refs use the consuming tool's input parameter name
+
+**Status:** Accepted
+**Date:** 2026-06-07
+
+### Problem
+ADR-003 promised ID-chaining ("pass refs.X to the next tool"), but in practice the ref
+keys (`blueprintId`, `materialId`, `actorId`, `graphId`) did NOT match the consuming
+tools' input params (`blueprint`, `material`, `actorLabel`/`label`, `graph`). Only
+`nodeId` chained. The agent had to translate id→name manually — the chain was broken.
+
+### Decision
+`autoRefs` emits each ref under the EXACT key the consuming tool accepts as input
+(`blueprint`, `material`, `actorLabel`, `label`, `graph`, `nodeId`, `assetPath`), with
+the `<entity>Id` convention name as an alias for the same value. So `refs.blueprint`
+feeds the next tool's `blueprint` param verbatim. The canonical ref→input mapping is
+documented in `.claude/rules/mcp-tools.md`.
+
+### Consequences
+- Chaining works end-to-end without manual translation.
+- `refs` carries both the input-name and the `*Id` alias (small duplication, intentional).
