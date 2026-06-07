@@ -2054,6 +2054,36 @@ FString FUnrealAgentServer::HandleRenameAsset(const FString& Body)
 // Set Blueprint Default Property Value
 // ============================================================
 
+// SEH guards: CDO reflection writes and Blueprint compile can raise structured
+// exceptions (access violations) that otherwise crash the whole editor. Keep these
+// minimal — no C++ objects needing unwinding inside the __try scope.
+static int32 SafeImportCDOValue_SEH(FProperty* Prop, UObject* CDO, const FString& Value, FString& OutNewValue)
+{
+	__try
+	{
+		const TCHAR* ImportResult = Prop->ImportText_Direct(*Value, Prop->ContainerPtrToValuePtr<void>(CDO), CDO, PPF_None);
+		if (!ImportResult) { return 2; } // parse failure
+		Prop->ExportTextItem_Direct(OutNewValue, Prop->ContainerPtrToValuePtr<void>(CDO), nullptr, CDO, PPF_None);
+		return 0;
+	}
+	__except (1) // EXCEPTION_EXECUTE_HANDLER
+	{
+		return 1; // structured exception
+	}
+}
+
+static void SafeExportCDOValue_SEH(FProperty* Prop, UObject* CDO, FString& Out)
+{
+	__try
+	{
+		Prop->ExportTextItem_Direct(Out, Prop->ContainerPtrToValuePtr<void>(CDO), nullptr, CDO, PPF_None);
+	}
+	__except (1) // EXCEPTION_EXECUTE_HANDLER
+	{
+		Out = TEXT("<unreadable>");
+	}
+}
+
 FString FUnrealAgentServer::HandleSetBlueprintDefault(const FString& Body)
 {
 	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
@@ -2096,8 +2126,46 @@ FString FUnrealAgentServer::HandleSetBlueprintDefault(const FString& Body)
 		return MakeErrorJson(FString::Printf(TEXT("Property '%s' not found on '%s'"), *PropertyName, *BlueprintName));
 	}
 
+	// R-13 fix: for a Blueprint-defined variable with a simple value, set its default
+	// via NewVariables (the compile's source of truth) and recompile — writing the
+	// live CDO directly and recompiling leaves an inconsistent CDO that crashes a
+	// later compile. Class/object/struct values fall through to the CDO path below.
+	{
+		const bool bSimpleValue = Prop->IsA<FBoolProperty>() || Prop->IsA<FNumericProperty>()
+			|| Prop->IsA<FStrProperty>() || Prop->IsA<FNameProperty>() || Prop->IsA<FTextProperty>()
+			|| Prop->IsA<FByteProperty>() || Prop->IsA<FEnumProperty>();
+		if (bSimpleValue)
+		{
+			for (FBPVariableDescription& VarDesc : BP->NewVariables)
+			{
+				if (VarDesc.VarName == FName(*PropertyName))
+				{
+					const FString OldDefault = VarDesc.DefaultValue;
+					VarDesc.DefaultValue = Value;
+					BP->Modify();
+					(void)OldDefault;
+					// SaveBlueprintPackage compiles with SkipGarbageCollection; do NOT add a
+					// separate default-options CompileBlueprint here (its GC pass corrupts
+					// state and crashes a later compile — R-13 root cause).
+					const bool bVarSaved = SaveBlueprintPackage(BP);
+					UE_LOG(LogTemp, Display, TEXT("UnrealAgent: Set BP var default '%s.%s' = '%s' (saved: %s)"),
+						*BlueprintName, *PropertyName, *Value, bVarSaved ? TEXT("true") : TEXT("false"));
+					TSharedRef<FJsonObject> R = MakeShared<FJsonObject>();
+					R->SetBoolField(TEXT("success"), true);
+					R->SetStringField(TEXT("blueprint"), BlueprintName);
+					R->SetStringField(TEXT("property"), PropertyName);
+					R->SetStringField(TEXT("oldValue"), OldDefault);
+					R->SetStringField(TEXT("newValue"), Value);
+					R->SetStringField(TEXT("propertyType"), Prop->GetCPPType());
+					R->SetBoolField(TEXT("saved"), bVarSaved);
+					return JsonToString(R);
+				}
+			}
+		}
+	}
+
 	FString OldValue;
-	Prop->ExportTextItem_Direct(OldValue, Prop->ContainerPtrToValuePtr<void>(CDO), nullptr, CDO, PPF_None);
+	SafeExportCDOValue_SEH(Prop, CDO, OldValue);
 
 	bool bSuccess = false;
 	FString ActualNewValue;
@@ -2183,10 +2251,10 @@ FString FUnrealAgentServer::HandleSetBlueprintDefault(const FString& Body)
 	// Handle simple types via ImportText
 	else
 	{
-		const TCHAR* ImportResult = Prop->ImportText_Direct(*Value, Prop->ContainerPtrToValuePtr<void>(CDO), CDO, PPF_None);
+		const TCHAR* ImportResult = (SafeImportCDOValue_SEH(Prop, CDO, Value, ActualNewValue) == 0) ? *Value : nullptr;
 		if (ImportResult)
 		{
-			Prop->ExportTextItem_Direct(ActualNewValue, Prop->ContainerPtrToValuePtr<void>(CDO), nullptr, CDO, PPF_None);
+			// value already exported into ActualNewValue by SafeImportCDOValue_SEH
 			bSuccess = true;
 		}
 		else
@@ -2206,7 +2274,7 @@ FString FUnrealAgentServer::HandleSetBlueprintDefault(const FString& Body)
 	CDO->MarkPackageDirty();
 	BP->Modify();
 
-	FKismetEditorUtilities::CompileBlueprint(BP);
+	// SaveBlueprintPackage compiles with SkipGarbageCollection; no extra compile here (R-13).
 	bool bSaved = SaveBlueprintPackage(BP);
 
 	UE_LOG(LogTemp, Display, TEXT("UnrealAgent: Set '%s.%s' from '%s' to '%s' (saved: %s)"),

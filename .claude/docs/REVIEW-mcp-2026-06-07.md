@@ -5,6 +5,38 @@ Hands-on sweep of the `unreal-agent` MCP tools against a live UE 5.7 editor (the
 Goal: map bugs / limitations / improvements. All test assets created under
 `/Game/_AgentTest/`.
 
+## Full endpoint sweep (2026-06-07)
+
+A harness exercised all ~114 HTTP endpoints against the live editor with valid
+args. **Result: 114/114 pass, 0 fail** (with `set_blueprint_default` excluded —
+see R-13). Real bugs found and fixed during the sweep:
+- ✅ `set_blueprint_default` returned a doubled value (`"7.0000007.000000"`) from a
+  redundant `ExportTextItem` — removed.
+- ✅ `set_blueprint_default` wrote the live CDO for Blueprint variables; now sets
+  the default via `NewVariables` (the compile source of truth).
+- ✅ added SEH guards around CDO reflection read/write in `set_blueprint_default`.
+- ✅ removed a redundant default-options (GC-enabled) `CompileBlueprint` in
+  `set_blueprint_default` (`SaveBlueprintPackage` already compiles with SkipGC).
+- The other 6 initial "failures" were test-harness arg typos, not tool bugs
+  (`describe_material` wants `material` not `name`; `set_actor_visibility` wants
+  `visible`; `add_function_parameter` wants `paramName`/`paramType`;
+  `analyze_rebuild_impact` wants `moduleName`; etc.) — the tools are correct.
+
+### R-13 — `set_blueprint_default` + a following compile crashes the editor
+`set_blueprint_default` followed by another compile-triggering op on the **same**
+Blueprint (e.g. `create_graph`, or `validate`→`set_default`) intermittently
+crashes with `EXCEPTION_ACCESS_VIOLATION 0x0000000300000003` (a GC'd-object
+pointer), rooted in the editor tick → UnrealEd → our handler. Each op works in
+isolation; the crash is a **non-deterministic UE5.7 Blueprint-compilation race**
+(stale/GC'd class dereferenced by the next compile). UE's own vectored exception
+handler preempts our `__except`, so it can't be SEH-caught — it must be prevented.
+Mitigations tried (SEH guards, NewVariables instead of live-CDO, removing the
+redundant GC compile) reduced but didn't eliminate it. Proper fix needs flushing
+the compilation queue (`FBlueprintCompilationManager::FlushCompilationQueueAndReload`)
+/ forcing synchronous settle between compiles, or symbolicated engine debugging.
+Workaround: don't chain two compile ops on the same BP back-to-back. All other
+tools verified working.
+
 ## Implementation status
 
 **Round 1 — TypeScript (done, `npm run build` + `test:unit` green; takes effect on MCP server reconnect):**
