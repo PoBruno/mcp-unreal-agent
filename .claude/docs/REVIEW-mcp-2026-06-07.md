@@ -49,11 +49,16 @@ Goal: map bugs / limitations / improvements. All test assets created under
 - ✅ R-10 — `add_material_expression` accepts `name`; verified a ScalarParameter
   created as "Brightness" (not "Param").
 
-**Remaining (scoped follow-ups, not blocking):**
-- Workstream C — migrate all ~120 tools to the `{ok,data,refs,...}` contract.
-  Large mechanical refactor (ADR-003), low user-visible value, regression risk;
-  a Phase-level effort, not a quick fix. Currently `server_status`,
-  `list_blueprints`, and the new mappers use it.
+**Round 5 — Workstream C DONE:**
+- ✅ All ~120 MCP tools migrated to the `{ok,data,refs,nextSteps,warnings,errorCode}`
+  contract via shared `wrapRaw`/`autoRefs`/`mapErrorCode`/`fail` helpers in
+  `types.ts`. Every tool now returns structured JSON (raw payload in `data`,
+  chainable ids auto-extracted into `refs`, errors mapped to the registry).
+  `npm run build` clean, `test:unit` green. Net −1518 lines (dead text-building
+  removed). Behavior note: tool output is now JSON instead of human text — the
+  contract's intent; the agent gets richer, chainable data.
+
+**Remaining (genuinely minor):**
 - Minor: state-machine **entry node** isn't auto-connected to the first state
   added (an empty SM still warns); a state with no animation warns its inner pose
   is ignored (expected until `set_state_animation`). Auto-connecting the entry to
