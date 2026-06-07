@@ -3,6 +3,7 @@
 #include "Materials/MaterialInstanceConstant.h"
 #include "Materials/MaterialFunction.h"
 #include "Materials/MaterialExpression.h"
+#include "Materials/MaterialExpressionParameter.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionTextureObjectParameter.h"
@@ -657,6 +658,18 @@ FString FUnrealAgentServer::HandleAddMaterialExpression(const FString& Body)
 		MatFunc->MarkPackageDirty();
 	}
 #endif
+
+	// R-10: optional parameter name on creation (avoids every new param defaulting to "Param").
+	{
+		FString ParamName;
+		if (Json->TryGetStringField(TEXT("name"), ParamName) && !ParamName.IsEmpty())
+		{
+			if (UMaterialExpressionParameter* ParamExpr = Cast<UMaterialExpressionParameter>(NewExpr))
+			{
+				ParamExpr->ParameterName = FName(*ParamName);
+			}
+		}
+	}
 
 	// Save
 	bool bSaved = Material ? SaveMaterialPackage(Material) : SaveGenericPackage(MatFunc);

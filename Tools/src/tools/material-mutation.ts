@@ -89,9 +89,10 @@ export function registerMaterialMutationTools(server: McpServer): void {
       expressionClass: z.string().describe("Expression class name without the 'MaterialExpression' prefix. Any UMaterialExpression subclass is supported (e.g. 'Constant', 'ScalarParameter', 'Add', 'Subtract', 'Fresnel', 'Comment', 'If', 'Lerp')."),
       posX: z.number().default(0).describe("X position in the graph editor"),
       posY: z.number().default(0).describe("Y position in the graph editor"),
+      name: z.string().optional().describe("For parameter expressions (ScalarParameter, VectorParameter, etc.): the parameter name. Avoids the default 'Param' collision when adding multiple."),
       dryRun: z.boolean().optional().describe("If true, preview changes without modifying the asset"),
     },
-    async ({ material, materialFunction, expressionClass, posX, posY, dryRun }) => {
+    async ({ material, materialFunction, expressionClass, posX, posY, name, dryRun }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
@@ -101,6 +102,7 @@ export function registerMaterialMutationTools(server: McpServer): void {
       const body: Record<string, any> = { expressionClass, posX, posY };
       if (material) body.material = material;
       if (materialFunction) body.materialFunction = materialFunction;
+      if (name) body.name = name;
       if (dryRun) body.dryRun = true;
 
       const data = await uePost("/api/add-material-expression", body);
