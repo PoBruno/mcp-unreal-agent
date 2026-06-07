@@ -42,6 +42,9 @@ import { registerOutputLogTools } from "./tools/output-log.js";
 import { registerUndoRedoTools } from "./tools/undo-redo.js";
 import { registerWidgetTools } from "./tools/widgets.js";
 
+// Context aggregators (layered/budgeted — not raw dumps)
+import { registerInspectTools } from "./tools/inspect.js";
+
 // Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
 import { registerWorkflowRecipesResource } from "./resources/workflow-recipes.js";
@@ -90,6 +93,7 @@ registerEditorUtilityTools(server);
 registerOutputLogTools(server);
 registerUndoRedoTools(server);
 registerWidgetTools(server);
+registerInspectTools(server);
 
 // Register resources
 registerBlueprintListResource(server);

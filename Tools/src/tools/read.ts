@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
 import { ok, fail, toMcp, wrapRaw, autoRefs, type ToolResult } from "../types.js";
+import { summarizeBlueprint, describeGraph } from "../graph-describe.js";
 
 export type BlueprintEntry = {
   name: string;
@@ -140,7 +141,9 @@ export function registerReadTools(server: McpServer): void {
 
       try {
         const data = await ueGet("/api/blueprint", { name });
-        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+        if (data?.error) return toMcp(wrapRaw(data));
+        // Return the COMPACT summary (~1-2K chars) in data, not the 300K raw payload.
+        return toMcp(ok({ summary: summarizeBlueprint(data) }, { refs: autoRefs(data) }));
       } catch (e) {
         return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
@@ -161,7 +164,8 @@ export function registerReadTools(server: McpServer): void {
       try {
         // ueGet uses URL.searchParams.set which handles encoding via encodeURIComponent (#8)
         const data = await ueGet("/api/graph", { name, graph });
-        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+        if (data?.error) return toMcp(wrapRaw(data));
+        return toMcp(ok({ pseudocode: describeGraph(data) }, { refs: autoRefs(data) }));
       } catch (e) {
         return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }

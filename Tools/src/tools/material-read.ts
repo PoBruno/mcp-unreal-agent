@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
-import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
+import { ok, toMcp, wrapRaw, autoRefs, fail } from "../types.js";
+import { describeMaterial } from "../material-describe.js";
 
 export function registerMaterialReadTools(server: McpServer): void {
   server.tool(
@@ -77,7 +78,8 @@ export function registerMaterialReadTools(server: McpServer): void {
 
       try {
         const data = await uePost("/api/describe-material", { material: name });
-        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+        if (data?.error) return toMcp(wrapRaw(data));
+        return toMcp(ok({ description: describeMaterial(data) }, { refs: autoRefs(data) }));
       } catch (e) {
         return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }

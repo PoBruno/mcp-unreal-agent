@@ -92,22 +92,41 @@ export function mapErrorCode(raw: any): ErrorCode {
   return "UE_HTTP_FAILED";
 }
 
-/** Pull commonly-chained ids out of a raw response into the refs map. */
+/**
+ * Pull commonly-chained ids out of a raw response into the refs map.
+ *
+ * Refs are emitted under the EXACT key the consuming tool accepts as input
+ * (so `refs.blueprint` feeds the next tool's `blueprint` param verbatim), with
+ * the `<entity>Id` convention name as an alias for the same value. This is what
+ * makes ID-chaining actually work end-to-end.
+ */
 export function autoRefs(raw: any): Record<string, RefValue> {
   const refs: Record<string, RefValue> = {};
   if (!raw || typeof raw !== "object") return refs;
-  const pick = (key: string, ...candidates: string[]) => {
+  const first = (...candidates: string[]): string | undefined => {
     for (const c of candidates) {
       const v = raw[c];
-      if (typeof v === "string" && v) { refs[key] = v; return; }
+      if (typeof v === "string" && v) return v;
     }
+    return undefined;
   };
-  pick("blueprintId", "blueprintId", "blueprintPath");
-  pick("materialId", "materialId", "materialPath");
-  pick("assetId", "assetPath", "path", "packagePath", "assetName");
-  pick("actorId", "actorId", "actorLabel", "label");
-  pick("nodeId", "nodeId", "newNodeId");
-  pick("graphId", "graph", "graphName");
+  const put = (value: string | undefined, ...keys: string[]) => {
+    if (value) for (const k of keys) refs[k] = value;
+  };
+
+  // Blueprint: consumed as `blueprint`; alias `blueprintId`.
+  put(first("blueprintPath", "blueprint", "path", "blueprintName"), "blueprint", "blueprintId");
+  // Material: consumed as `material`; alias `materialId`.
+  put(first("materialPath", "material"), "material", "materialId");
+  // Generic asset: consumed as `assetPath` (delete_asset, open_asset_editor).
+  put(first("assetPath", "packagePath"), "assetPath", "assetId");
+  // Actor: consumed as `actorLabel` (actor tools) or `label` (level tools).
+  put(first("actorLabel", "label", "newLabel"), "actorLabel", "label", "actorId");
+  // Graph node: consumed as `nodeId`.
+  put(first("nodeId", "newNodeId"), "nodeId");
+  // Graph: consumed as `graph`.
+  put(first("graph", "graphName"), "graph", "graphId");
+
   if (Array.isArray(raw.blueprints)) {
     const ids = raw.blueprints.map((b: any) => b?.path).filter((p: any): p is string => typeof p === "string");
     if (ids.length) refs.blueprintIds = ids;
