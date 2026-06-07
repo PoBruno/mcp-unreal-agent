@@ -1,122 +1,127 @@
-# PLAN — MCP completeness + live view (consolidated)
+# PLAN — Agent context & tool cohesion
 
-Folds together: (a) the live-view / agent-presence feature, (b) every finding from
-the 2026-06-07 live review (see [REVIEW-mcp-2026-06-07.md](REVIEW-mcp-2026-06-07.md),
-R-01..R-11), and (c) the gaps needed to call the editor-control surface "complete".
+Goal: give the agent the *right* context cheaply, and make the ~120 tools actually
+chain. Driven by the question "should we have a tool that returns complete context?"
+— answer: yes, but as a **layered, budgeted, ref-returning `inspect`**, not a full dump.
 
 ## Problem
 
-The plugin has far more implemented than the agent can reach: **17 of 36 tool
-groups aren't registered**, so scene/level/actor/PIE/selection/camera/widget
-control is dead on arrival. Several reachable tools have correctness/robustness
-bugs (batch connect, health-check flakiness, screenshots, exec output). The
-output contract is migrated for only 2 tools. And there's no way for the user to
-**watch** what the agent does in the open editor — the feature that makes the
-whole thing feel alive — which must be added without ever conflicting with UE's
-own save/edit state.
+1. **Context is all-or-nothing.** The agent either calls many granular tools (high
+   orchestration overhead, easy to miss a piece) or — tempting — wants "everything"
+   (token bomb: a raw BP dump is 300K+ chars, dilutes attention, goes stale). There's
+   no single, *budgeted* "give me a map of X" entry point.
+2. **The ID-chain contract (ADR-003) is broken in practice.** `refs` keys don't match
+   the consuming tools' input param names, so the agent can't blindly feed a ref into
+   the next call. Audit (autoRefs vs input schemas):
+   | ref out | input in | chains? |
+   |---|---|---|
+   | `nodeId` | `nodeId` | ✅ |
+   | `blueprintId` | `blueprint` | ❌ name mismatch |
+   | `materialId` | `material` | ❌ |
+   | `actorId` | `actorLabel` / `label` | ❌ |
+   | `graphId` | `graph` | ❌ |
+   Only `nodeId` chains cleanly. The promise of "pass refs.X to param X" mostly fails.
+3. **Migration regression.** The contract sweep wrapped `get_blueprint_summary`,
+   `describe_graph`, `describe_material` in `wrapRaw` → they now return the *raw*
+   payload in `data` instead of their compact human/agent summary. The very tools whose
+   job was token-efficient context now dump raw JSON. (Flagged by the migration agents.)
+4. **Capability gaps found while building the character flow & the 114-endpoint sweep:**
+   - No generic asset listing — only `list_blueprints` / `list_materials`. Can't list
+     skeletons, meshes, textures, anim sequences, data assets (had to scan the filesystem).
+   - No clean way to set a **Blueprint component's default** (had to use `python_exec`
+     to set the Character mesh + anim class).
+   - Anim **state-machine entry isn't connected** to the first state; no tool to do it.
+   - `set_blueprint_default` + a following compile crashes (R-13).
+   - Material node GUIDs regenerate per session (must re-`get_material_graph`).
 
-Empirical note from the review: mutating an asset via MCP while its editor is
-open did **not** conflict (BP/material/anim BP all edited live on :9847, saved,
-editor stayed healthy). The no-conflict premise for asset-editor reveal holds;
-remaining risk is focus-stealing and save scoping, addressed below.
+## Scope
 
-## Scope (workstreams)
+### A. `inspect` — the layered context tool (the headline)
+One tool, target + `include[]` + `depth`. Returns a **structured, budgeted map**, not a dump.
+- `inspect({ target, include?, depth?, tokenBudget? })`
+  - `target`: asset path/name, actor label, or `"level"`.
+  - `include`: subset of `["overview","variables","components","graphs","interfaces",
+    "dispatchers","cdo-defaults","functions","usages","material-params","skeleton"]`
+    (auto-picked by target type when omitted).
+  - `depth`: `"summary"` (default) | `"full"`.
+  - `tokenBudget`: soft cap; output truncates with explicit `"…N more, call <tool>"`.
+- Returns the structured contract with: a compact `data` map (counts + names +
+  one-line summaries) and **`refs` the agent drills into** (graphIds, componentIds,
+  variableIds). Default `summary` stays ~1–3K chars; `full` opts into the big payload
+  per-section, never the whole thing at once.
+- Internally it composes the existing read tools (it's an aggregator, not new C++).
 
-### A. Surface completeness — expose what already exists (R-01)
-- Register the 17 missing groups in `Tools/src/index.ts`: actor-query,
-  actor-state, level, level-actors, sublevels, selection, spatial, camera,
-  view-mode, pie-lifecycle, pie-runtime, cvars, content-browser, editor-utils,
-  output-log, undo-redo, widgets.
-- Smoke-test each group against the live editor; fix any that error on first call.
-- Add the structured-output contract as each is touched (don't regress).
+### B. `get_edit_context(target, operation)` — task-scoped context
+"What's relevant *before this edit*", not everything. e.g. before `change_variable_type`:
+the variable + its Break/Make usages + dependent Blueprints (compose
+`find_asset_references` + `search_by_type` + `analyze_rebuild_impact`). Far higher
+signal than a blind dump; this is what "context before mutating" actually means.
 
-### B. Robustness / correctness bug fixes (review findings)
-- R-02 `connect_pins` batch: make single-mode fields optional when `batch` given
-  (mirror `set_pin_default`).
-- R-03 health/spawn: raise health timeout (≥10s) + retry; don't spawn when
-  recently connected; `findEditorCmd` (and `bootstrap.ts`) scan all drives +
-  honor `UE_EDITOR_CMD`; clearer error text.
-- R-04 screenshots: locate a valid level viewport (or render offscreen with an
-  explicit resolution) so `take_screenshot` / `take_high_res_screenshot` produce
-  a real file. (Also a prerequisite for "watch the agent".)
-- R-05 `exec_command`: capture Output Log; add `python_exec` returning stdout +
-  last expression value.
-- R-06 `describe_graph`: treat OVERRIDE/event nodes as entry points.
-- R-07 `add_state_machine`: honor the `name` param for the sub-graph.
-- R-08 anim: auto-wire (or expose a tool to wire) the state machine to the
-  AnimGraph Output Pose; validate the ABP actually outputs a pose.
-- R-09 `connect_material_pins`: accept the `'Result'` sentinel for the output
-  node; allow the named default outputs; document/return pin names.
-- R-10 material params: optional name on `add_material_expression`.
+### C. Fix the ID-chain contract (make refs == input params)
+- Add **aliased input params** so every consuming tool accepts BOTH the human name and
+  the ref id: `blueprint` ⇄ `blueprintId`, `material` ⇄ `materialId`, `label` ⇄
+  `actorId`. Cheapest path: widen Zod + normalize in the handler wrapper. Then the
+  ID-chain promise holds for real.
+- Make `autoRefs` emit the SAME keys the inputs accept; document the canonical set in
+  `mcp-tools.md` + `tool-chains/SKILL.md` ref table.
 
-### C. Output contract migration (R-11)
-- Migrate all reachable tools to `{ ok, data, refs, nextSteps, warnings,
-  errorCode }` via the `types.ts` helpers; one entity-ref per tool. Make the C++
-  HTTP envelope carry it where practical (ARCHITECTURE §4).
+### D. Un-regress the summary tools
+- `get_blueprint_summary` / `describe_graph` / `describe_material` must put their
+  **compact summary** in `data` (not the raw payload). These are `inspect`'s building
+  blocks — they should be the canonical "summary depth" renderers.
 
-### D. Live view / agent presence (the feature)
-- Reveal primitives (editor-only): `editor_open_asset`, `editor_focus_actor`
-  (select + frame), `editor_open_level`.
-- Scoped save: `editor_save_agent_changes` — save only packages the agent
-  dirtied this session; compile BPs first; never the user's unrelated dirty
-  assets.
-- Opt-in `agent_set_presence({ enabled, autoReveal, autoSave })`, **default OFF**;
-  when on, mutation handlers reveal their target *after* the mutation completes
-  (same game-thread queue → no race, confirmed by the review).
-- Tool-by-tool safety matrix: classify each mutation tool (what to reveal, when,
-  what package it dirties). First deliverable of this workstream.
-- ADR for the auto-reveal + auto-save policy (single-agent assumption).
-- Depends on R-04 (working viewport/screenshot) for visual confirmation.
+### E. New capabilities worth giving the agent
+- `list_assets({ classFilter?, pathFilter? })` — generic asset browse (skeletons,
+  meshes, textures, anims, data assets). Removes the filesystem-scan crutch.
+- `set_component_default` — set a default property on a BP component (incl. inherited,
+  e.g. Character `Mesh` skeletal mesh / anim class) without `python_exec`.
+- `connect_anim_entry` (or auto-connect in `add_anim_state` for the first state) so a
+  state machine actually outputs a pose.
+- `describe_level` — budgeted scene context (actor counts by class, key actors, bounds).
+- (Stretch) `get_class_api(class)` — unify `list_functions`/`list_properties` into one
+  introspection call the agent uses before authoring nodes.
 
-### Out of scope (separate ROADMAP phases, not this plan)
-- Sequencer / MRQ / World Partition (Phase 3), cook/package/PIE-driven shipping
-  (Phase 4 beyond exposing existing PIE tools), `cpp_read_symbol` C++ bridge,
-  source control. These are tracked in ROADMAP.md and are not part of
-  "complete the editor-control surface + live view".
-- Multi-agent / multi-editor, remote sessions (ARCHITECTURE §10).
+### Out of scope
+- The naive "one giant JSON of everything" tool (rejected — token/attention cost).
+- Re-architecting the C++ HTTP layer.
 
 ## Approach
 
-Sequence: **A → B → C → D**, but interleave B-fixes as each A-group is smoke
-tested (a group that errors on first call is a B-fix). Each newly registered
-group is validated live in the `test/test` project and gets the structured
-contract. Live-view (D) lands last because it depends on a working viewport
-(R-04) and on the actor/level tools (A) it reveals. Every editor-only tool gates
-on `/health` `mode==editor` and SEH-wraps native calls (ARCHITECTURE §6,
-cpp-ue rules). The presence toggle is server-side state in the editor subsystem;
-reveal is best-effort, idempotent, default OFF.
+`inspect` and `get_edit_context` are **TS-side aggregators** over existing endpoints —
+no new C++ for the common cases. They enforce the token budget in TS and return the
+structured contract (summaries in `data`, ids in `refs`). The ref-alias fix is a small
+normalization layer applied at tool registration. The summary un-regression restores
+the original renderers (`summarizeBlueprint`/`describeGraph`/`describeMaterial`) into
+`data`. New C++ is only needed for `set_component_default`, `connect_anim_entry`,
+`list_assets`, `describe_level` (small handlers). An ADR records the "layered/budgeted,
+not full-dump" decision.
 
 ## Validation
 
-- All 36 tool groups reachable; each has ≥1 green live call in `test/test`.
-- R-02..R-10 each have a regression check (unit where pure, live where editor).
-- `npm run build` + `npm run test:unit` green; structured contract on every
-  migrated tool.
-- Live view: presence ON → editing BP_X opens BP_X, moving an actor frames it,
-  editing a level opens it; presence OFF → nothing opens unless asked.
-- Scoped save: agent edits A, user hand-dirties B → save persists A, leaves B.
-- No corruption: mutate → reveal → save → reload round-trips intact; reveal
-  during an in-flight mutation serializes (no AV) — re-confirm under load.
-- Screenshots produce a real non-zero PNG.
+- `inspect("BP_X")` default ≤ ~3K chars, returns counts + refs; `depth:"full"` returns
+  per-section detail on request; never the whole 300K blob unprompted.
+- Every `refs.<x>` produced by a tool is accepted as an input by the tool it's meant to
+  feed (round-trip test per ref type).
+- `get_blueprint_summary` returns the compact summary again (regression test).
+- `get_edit_context("BP_X","change_variable_type:V")` returns the variable + usages +
+  dependents, nothing else.
+- Cohesion sweep: for each of the canonical flows (BP authoring, material authoring,
+  anim setup, actor/level, live-view) the output of step N feeds step N+1 with no
+  manual id translation.
 
 ## Risks
 
-1. Registering 17 groups surfaces latent bugs in long-unused handlers — mitigate
-   by smoke-testing each on registration, fixing before moving on.
-2. Focus-stealing from auto-reveal — default OFF, opt-in, idempotent, never on
-   read-only tools.
-3. Save scope leakage (saving the user's unrelated dirty assets) — track touched
-   packages explicitly; compile BPs before save; ADR documents the policy.
-4. Editor-only tools crashing the commandlet — gate on `mode==editor`, SEH-wrap,
-   return `EDITOR_REQUIRED`.
-5. Contract migration churn across ~120 tools — migrate per group as it's touched,
-   not in one big-bang pass.
+1. `inspect` re-becomes a dump if `include`/budget aren't enforced — make budget +
+   truncation markers mandatory, default `summary`.
+2. Ref aliasing could mask real "wrong id" errors — normalize, but still validate the
+   resolved target exists and return a clear errorCode.
+3. Aggregators add latency (N internal calls) — parallelize the internal reads; cache
+   within a single `inspect` call.
 
 ## Dependencies
 
-- Sprint 1 (structured contract + types.ts) — done.
-- Live editor on 9847 in `test/test` for live validation — working.
-- New ADR: auto-reveal + auto-save policy.
-- R-04 (viewport/screenshot) before D's visual confirmation.
-- No conflict with existing ADRs; extends ADR-003 (contract) and ADR-004
-  (composite flows); complements ROADMAP Phase 5 "watch it happen".
+- Structured contract (ADR-003) — done; this plan *fixes* its ref half.
+- Existing read tools (`get_blueprint_summary`, `find_asset_references`,
+  `analyze_rebuild_impact`, `get_material_graph`, `get_skeleton`) — the composition base.
+- New ADR: "context bundles are layered/budgeted, not full dumps."
+- Complements the live-view plan (revealing what the agent inspects/edits).
