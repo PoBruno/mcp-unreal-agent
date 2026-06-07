@@ -1,0 +1,13 @@
+{
+  "_comment": "Template MCP config for Claude Code. The install playbook merges this into your project's .mcp.json — it does not overwrite existing servers.",
+  "mcpServers": {
+    "unreal-agent": {
+      "command": "node",
+      "args": ["Plugins/UnrealAgent/Tools/dist/index.js"],
+      "env": {
+        "UE_PROJECT_DIR": ".",
+        "UE_PORT": "9847"
+      }
+    }
+  }
+}

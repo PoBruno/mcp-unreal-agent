@@ -1,0 +1,19 @@
+# UE5 build outputs
+Binaries/
+Intermediate/
+
+# TypeScript
+Tools/node_modules/
+Tools/dist/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vs/
+.vscode/
+*.suo
+*.user
+
+# Local agent transcripts / scratch
+.claude/local/
+.scratch/

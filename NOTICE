@@ -1,0 +1,15 @@
+# NOTICE
+
+`mcp-unreal-agent` derives from and extends the following upstream project:
+
+## ue5-mcp
+
+- **Repository:** https://github.com/mirno-ehf/ue5-mcp
+- **Copyright:** © 2025 mirno-ehf
+- **License:** MIT
+- **What was used:** the C++ Unreal Engine plugin scaffold (HTTP server, editor subsystem, commandlet host, JSON helpers, SEH-wrapped compile/save) and the TypeScript MCP server infrastructure (Zod schemas, tool registration pattern, vitest bootstrap with temporary UE project).
+- **What changed:** module renamed from `BlueprintMCP` to `UnrealAgent`; scope expanded beyond Blueprint inspection to cover the complete UE5 editor surface (asset pipeline, sequencer, MRQ, World Partition, source control, cook/package, C++ build); contribution policy opened to humans and AI agents; full Claude Code + GitHub Copilot dual harness added.
+
+If you want strict, focused Blueprint-only tooling, use the upstream `ue5-mcp` directly — it stays small and sharp on purpose.
+
+If you want a broader, opinionated UE5 agent runtime with first-class agent ergonomics (composite atomic flows, ID-chained outputs, C++ context bridge, install playbook), use this project.

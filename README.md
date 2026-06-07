@@ -1,0 +1,98 @@
+# mcp-unreal-agent
+
+> Give AI coding agents complete control of Unreal Engine 5 — Blueprints, materials, sequencer, MRQ, World Partition, cook/package — via MCP.
+
+Built as a dual-harness project: ships first-class instructions for both **Claude Code** and **GitHub Copilot**, so you can drive UE5 from either coding assistant with the same tools.
+
+---
+
+## What this is
+
+A two-part system:
+
+1. **`UnrealAgent` plugin** (C++) — an editor plugin that runs an HTTP server inside UE5 and exposes the editor's full API surface (asset pipeline, BP graphs, material editor, sequencer, MRQ, World Partition, level streaming, undo/redo, content browser, source control, cook/package).
+2. **`unreal-agent` MCP server** (TypeScript) — translates MCP tool calls from your AI agent into HTTP calls to the plugin.
+
+Two serving modes:
+- **Editor subsystem** (preferred): auto-starts on port `9847` when the UE5 editor is open. Zero overhead.
+- **Headless commandlet**: spawns `UnrealEditor-Cmd.exe` (~2-4 GB RAM, ~60s startup). Use for CI, scripted asset operations, or when the editor isn't open.
+
+---
+
+## One-prompt install
+
+Open a UE5 project in your IDE, then paste this into your agent:
+
+### Claude Code
+
+```
+Set up https://github.com/PoBruno/mcp-unreal-agent in my project.
+Follow the install playbook at install/AGENT-PLAYBOOK.md from that repo.
+```
+
+### GitHub Copilot
+
+```
+Read https://github.com/PoBruno/mcp-unreal-agent/blob/main/install/AGENT-PLAYBOOK.md
+and execute every step. The repo is a UE5 MCP server — install it into this UE5 project.
+```
+
+The agent will: detect your `.uproject`, clone the plugin into `Plugins/UnrealAgent/`, build the TypeScript server, enable `PythonScriptPlugin`, write the MCP config, and verify with a health check.
+
+Both prompts work because the install playbook is the same — it lives at [install/AGENT-PLAYBOOK.md](install/AGENT-PLAYBOOK.md).
+
+---
+
+## Requirements
+
+| Requirement | Version |
+|---|---|
+| Unreal Engine | 5.4+ |
+| Node.js | 18+ |
+| Visual Studio | 2022 with C++ Game Dev workload (for plugin compile) |
+| OS | Windows 10/11 (other platforms not yet tested) |
+
+---
+
+## How it differs from upstream `ue5-mcp`
+
+`ue5-mcp` (https://github.com/mirno-ehf/ue5-mcp) is a tight, focused Blueprint inspector. We forked and expanded.
+
+| | upstream `ue5-mcp` | `mcp-unreal-agent` |
+|---|---|---|
+| Scope | Blueprints only | Full editor: BP + materials + sequencer + MRQ + WP + cook/package + C++ context bridge |
+| Tool count | ~38 | Expanding to ~120 across 12 domains |
+| Output format | text + JSON | Structured `{ ok, data, refs, nextSteps, warnings, errorCode }` with ID chaining |
+| Contribution policy | AI-only PRs | Open to humans and AI agents |
+| Harness | Claude Code | Claude Code **and** GitHub Copilot — same docs power both |
+| Install | manual setup | one-prompt playbook (`install/AGENT-PLAYBOOK.md`) |
+
+If you only need Blueprint inspection, use upstream — it stays small on purpose. If you want a complete UE5 agent runtime, you're in the right place.
+
+---
+
+## Documentation
+
+- **[CLAUDE.md](CLAUDE.md)** — agent entry point: tech stack, conventions, doc index, commands. Also read by GitHub Copilot via `.github/copilot-instructions.md`.
+- **[AGENTS.md](AGENTS.md)** — universal bridge for Cursor and other agents.
+- **[.claude/docs/ARCHITECTURE.md](.claude/docs/ARCHITECTURE.md)** — system design, the source of truth for every architectural decision.
+- **[.claude/docs/ROADMAP.md](.claude/docs/ROADMAP.md)** — phases and milestones.
+- **[.claude/docs/SPRINTS.md](.claude/docs/SPRINTS.md)** — current sprint tasks.
+- **[install/AGENT-PLAYBOOK.md](install/AGENT-PLAYBOOK.md)** — agent-executable install steps.
+
+---
+
+## Built with
+
+This project was bootstrapped and is being developed with Claude Code and GitHub Copilot. Both agents read the same instruction harness in [CLAUDE.md](CLAUDE.md) and [.claude/](.claude/), with Copilot bridged via [.github/copilot-instructions.md](.github/copilot-instructions.md). The dual-harness pattern itself is a deliverable of this repo — see [.claude/docs/DECISIONS.md](.claude/docs/DECISIONS.md) for why.
+
+---
+
+## Credits
+
+- Upstream foundation: [mirno-ehf/ue5-mcp](https://github.com/mirno-ehf/ue5-mcp) (MIT)
+- See [NOTICE](NOTICE) for full attribution
+
+## License
+
+MIT — see [LICENSE](LICENSE).

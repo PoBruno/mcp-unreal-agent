@@ -1,0 +1,22 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Unreal Agent",
+	"Description": "Complete UE5 agent runtime — exposes Blueprints, materials, sequencer, MRQ, World Partition, cook/package to AI coding agents via MCP. Editor subsystem + headless commandlet.",
+	"DocsURL": "https://github.com/PoBruno/mcp-unreal-agent",
+	"MarketplaceURL": "",
+	"SupportURL": "https://github.com/PoBruno/mcp-unreal-agent/issues",
+	"Category": "Editor",
+	"CreatedBy": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "UnrealAgent",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
