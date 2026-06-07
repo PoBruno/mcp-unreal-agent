@@ -42,13 +42,26 @@ Goal: map bugs / limitations / improvements. All test assets created under
 - Note: the `python_exec` MCP *tool* needs an MCP server reconnect to appear; the
   `/api/python-exec` endpoint works now.
 
-**Still pending C++:**
-- ⏳ R-04 screenshots (STILL broken — "invalid dimensions" even with a focused
-  level viewport; needs offscreen/explicit-resolution capture), R-05 exec output
-  / `python_exec`, R-07 state-machine name, R-08 anim Output Pose, R-10 material
-  param name.
+**Round 4 — C++ (done + verified):**
+- ✅ R-07 — `add_state_machine` honors `name`; sub-graph created as "Locomotion".
+- ✅ R-08 — state machine output auto-wired to AnimGraph Output Pose (the
+  top-level "Output Pose ignored" warning is gone).
+- ✅ R-10 — `add_material_expression` accepts `name`; verified a ScalarParameter
+  created as "Brightness" (not "Param").
+
+**Remaining (scoped follow-ups, not blocking):**
+- Workstream C — migrate all ~120 tools to the `{ok,data,refs,...}` contract.
+  Large mechanical refactor (ADR-003), low user-visible value, regression risk;
+  a Phase-level effort, not a quick fix. Currently `server_status`,
+  `list_blueprints`, and the new mappers use it.
+- Minor: state-machine **entry node** isn't auto-connected to the first state
+  added (an empty SM still warns); a state with no animation warns its inner pose
+  is ignored (expected until `set_state_animation`). Auto-connecting the entry to
+  the first state would make `add_anim_state` produce a runnable SM.
 - Note: material graph node GUIDs regenerate across editor sessions — agents must
   re-fetch via `get_material_graph` each session (not a bug, document it).
+- R-05 follow-up: exec_command captures console output fine; only Python needed a
+  dedicated tool — done (`python_exec`).
 
 **Round 3+ —** R-11 contract migration (Workstream C), live-view (Workstream D).
 
