@@ -32,8 +32,13 @@ Goal: map bugs / limitations / improvements. All test assets created under
   .uplugin). Verified live: `print(...)` → captured output; expression → result
   (`get_engine_version()` → "5.7.4..."). exec_command stays for console commands.
 - 🟡 R-04 screenshot — robustness fixed (valid dims, file written, camera/realtime
-  control works) but scene content blank when editor not foregrounded (needs the
-  SceneCapture2D offscreen path — tracked).
+  control works) but on-screen viewport content blank when editor not foregrounded.
+  ✅ SOLVED the "see the scene" goal via the offscreen path: `python_exec` running a
+  `SceneCapture2D` → 8-bit `RTF_RGBA8` render target → `export_render_target` PNG
+  renders the real 3D scene independent of window focus (verified — captured the
+  FirstPerson level). TODO: productize this as a first-class C++ tool
+  (`capture_scene_offscreen`) instead of an ad-hoc Python script; note
+  `export_render_target` writes EXR for float RTs, so the RT must be `RTF_RGBA8`.
 - Note: the `python_exec` MCP *tool* needs an MCP server reconnect to appear; the
   `/api/python-exec` endpoint works now.
 
