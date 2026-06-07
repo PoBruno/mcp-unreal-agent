@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
 import { TYPE_NAME_DOCS } from "../helpers.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerUserTypeTools(server: McpServer): void {
   server.tool(
@@ -16,25 +17,23 @@ export function registerUserTypeTools(server: McpServer): void {
     },
     async ({ assetPath, properties }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { assetPath };
       if (properties) body.properties = properties;
 
-      const data = await uePost("/api/create-struct", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Struct created successfully.`);
-      lines.push(`Asset: ${data.assetPath}`);
-      lines.push(`Properties added: ${data.propertiesAdded}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  add_struct_property — add more properties`);
-      lines.push(`  search_by_type — find usages of this struct`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-struct", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "add_struct_property to add more properties",
+            "search_by_type to find usages of this struct",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -47,18 +46,14 @@ export function registerUserTypeTools(server: McpServer): void {
     },
     async ({ assetPath, values }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/create-enum", { assetPath, values });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Enum created successfully.`);
-      lines.push(`Asset: ${data.assetPath}`);
-      lines.push(`Values: ${data.valueCount}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-enum", { assetPath, values });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -72,18 +67,14 @@ export function registerUserTypeTools(server: McpServer): void {
     },
     async ({ assetPath, name, type }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/add-struct-property", { assetPath, name, type });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Property added successfully.`);
-      lines.push(`Struct: ${data.assetPath}`);
-      lines.push(`Property: ${data.propertyName}: ${data.propertyType}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/add-struct-property", { assetPath, name, type });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -96,24 +87,14 @@ export function registerUserTypeTools(server: McpServer): void {
     },
     async ({ assetPath, name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/remove-struct-property", { assetPath, name });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableProperties?.length) {
-          msg += `\nAvailable properties: ${data.availableProperties.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/remove-struct-property", { assetPath, name });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Property removed successfully.`);
-      lines.push(`Struct: ${data.assetPath}`);
-      lines.push(`Removed: ${data.removedProperty}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerGroomTools(server: McpServer): void {
   // ------------------------------------------------------------------
@@ -18,36 +19,23 @@ export function registerGroomTools(server: McpServer): void {
     },
     async ({ query }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const params: Record<string, string> = {};
       if (query) params.query = query;
 
-      const data = await ueGet("/api/list-groom-bindings", params);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const bindings: any[] = data.bindings ?? [];
-      if (bindings.length === 0) {
-        const msg = query
-          ? `No groom binding assets found matching '${query}'.`
-          : "No groom binding assets found in the project.";
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await ueGet("/api/list-groom-bindings", params);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use duplicate_groom_binding to copy a binding for a new character",
+            "use set_groom_binding_target_mesh to change which skeletal mesh a binding targets",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [`Found ${data.count} groom binding(s):`];
-      for (const b of bindings) {
-        lines.push(`\n  ${b.name}`);
-        lines.push(`    Asset path:   ${b.assetPath}`);
-        if (b.groomAsset)         lines.push(`    Groom asset:  ${b.groomAsset}`);
-        if (b.targetSkeletalMesh) lines.push(`    Target mesh:  ${b.targetSkeletalMesh}`);
-        if (b.sourceSkeletalMesh) lines.push(`    Source mesh:  ${b.sourceSkeletalMesh}`);
-      }
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  • Use duplicate_groom_binding to copy a binding for a new character`);
-      lines.push(`  • Use set_groom_binding_target_mesh to change which skeletal mesh a binding targets`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -76,26 +64,23 @@ export function registerGroomTools(server: McpServer): void {
     },
     async ({ assetPath, newName, newFolder }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { assetPath, newName };
       if (newFolder) body.newFolder = newFolder;
 
-      const data = await uePost("/api/duplicate-groom-binding", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Groom binding duplicated successfully.`);
-      lines.push(`  Original:  ${data.originalPath}`);
-      lines.push(`  New asset: ${data.newPath}`);
-      lines.push(`  Saved:     ${data.saved}`);
-      if (data.warning) lines.push(`  Warning:   ${data.warning}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Call set_groom_binding_target_mesh to point the new binding at the correct skeletal mesh`);
-      lines.push(`  2. Open the binding in the Unreal Editor and click 'Rebuild Binding' to bake the new binding data`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/duplicate-groom-binding", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "call set_groom_binding_target_mesh to point the new binding at the correct skeletal mesh",
+            "open the binding in the editor and click 'Rebuild Binding' to bake the new binding data",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -124,30 +109,22 @@ export function registerGroomTools(server: McpServer): void {
     },
     async ({ assetPath, targetMeshPath, sourceMeshPath }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { assetPath, targetMeshPath };
       if (sourceMeshPath) body.sourceMeshPath = sourceMeshPath;
 
-      const data = await uePost("/api/set-groom-binding-target-mesh", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Groom binding target mesh updated.`);
-      lines.push(`  Asset:           ${data.asset}`);
-      lines.push(`  Old target mesh: ${data.oldTargetMesh || "(none)"}`);
-      lines.push(`  New target mesh: ${data.newTargetMesh}`);
-      if (data.oldSourceMesh !== undefined || data.newSourceMesh !== undefined) {
-        lines.push(`  Old source mesh: ${data.oldSourceMesh || "(none)"}`);
-        lines.push(`  New source mesh: ${data.newSourceMesh || "(unchanged)"}`);
+      try {
+        const data = await uePost("/api/set-groom-binding-target-mesh", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "open the asset in the editor and click 'Rebuild Binding' to regenerate the binding data for the new mesh",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      lines.push(`  Saved:           ${data.saved}`);
-
-      if (data.note) {
-        lines.push(`\nIMPORTANT: ${data.note}`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

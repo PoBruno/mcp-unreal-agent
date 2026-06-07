@@ -1,9 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
-import { summarizeBlueprint } from "../graph-describe.js";
-import { describeGraph } from "../graph-describe.js";
-import { ok, fail, toMcp, type ToolResult } from "../types.js";
+import { ok, fail, toMcp, wrapRaw, autoRefs, type ToolResult } from "../types.js";
 
 export type BlueprintEntry = {
   name: string;
@@ -73,12 +71,14 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/blueprint", { name });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+      try {
+        const data = await ueGet("/api/blueprint", { name });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -91,17 +91,15 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ name, graph }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      // ueGet uses URL.searchParams.set which handles encoding via encodeURIComponent (#8)
-      const data = await ueGet("/api/graph", { name, graph });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableGraphs) msg += `\nAvailable: ${data.availableGraphs.join(", ")}`;
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        // ueGet uses URL.searchParams.set which handles encoding via encodeURIComponent (#8)
+        const data = await ueGet("/api/graph", { name, graph });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
     }
   );
 
@@ -115,27 +113,18 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ query, path: pathFilter, maxResults }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/search", {
-        query,
-        path: pathFilter || "",
-        maxResults: String(maxResults),
-      });
-
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = data.results.map(
-        (r: any) => {
-          const levelTag = r.isLevelBlueprint ? " Level" : "";
-          return `[${r.blueprint}${levelTag}] ${r.graph} > ${r.nodeTitle}` +
-            (r.functionName ? ` fn:${r.functionName}` : "") +
-            (r.eventName ? ` event:${r.eventName}` : "") +
-            (r.variableName ? ` var:${r.variableName}` : "");
-        }
-      );
-      const summary = `Found ${data.resultCount} results for "${query}":\n\n${lines.join("\n")}`;
-      return { content: [{ type: "text" as const, text: summary }] };
+      try {
+        const data = await ueGet("/api/search", {
+          query,
+          path: pathFilter || "",
+          maxResults: String(maxResults),
+        });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -147,12 +136,14 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/blueprint", { name });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: summarizeBlueprint(data) }] };
+      try {
+        const data = await ueGet("/api/blueprint", { name });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -165,17 +156,15 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ name, graph }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      // ueGet uses URL.searchParams.set which handles encoding via encodeURIComponent (#8)
-      const data = await ueGet("/api/graph", { name, graph });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableGraphs) msg += `\nAvailable: ${data.availableGraphs.join(", ")}`;
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        // ueGet uses URL.searchParams.set which handles encoding via encodeURIComponent (#8)
+        const data = await ueGet("/api/graph", { name, graph });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: describeGraph(data) }] };
     }
   );
 
@@ -187,32 +176,14 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ assetPath }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/references", { assetPath });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`References to: ${data.assetPath}`);
-      lines.push(`Total referencers: ${data.totalReferencers}`);
-
-      if (data.blueprintReferencerCount > 0) {
-        lines.push(`\nBlueprint referencers (${data.blueprintReferencerCount}):`);
-        for (const ref of data.blueprintReferencers) {
-          lines.push(`  ${ref}`);
-        }
+      try {
+        const data = await ueGet("/api/references", { assetPath });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      if (data.otherReferencerCount > 0) {
-        lines.push(`\nOther referencers (${data.otherReferencerCount}):`);
-        for (const ref of data.otherReferencers) {
-          lines.push(`  ${ref}`);
-        }
-      }
-      if (data.totalReferencers === 0) {
-        lines.push("\nNo referencers found. Asset is safe to delete.");
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -225,76 +196,17 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ typeName, filter }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const params: Record<string, string> = { typeName };
       if (filter) params.filter = filter;
 
-      const data = await ueGet("/api/search-by-type", params);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      // C++ returns a flat `results` array with a `usage` field on each entry.
-      // Categorize by usage type for readable output.
-      const results: any[] = data.results || [];
-      const variables = results.filter((r: any) => r.usage === "variable");
-      const funcParams = results.filter((r: any) => r.usage === "functionParameter");
-      const eventParams = results.filter((r: any) => r.usage === "eventParameter");
-      const breakStructs = results.filter((r: any) => r.usage === "breakStruct");
-      const makeStructs = results.filter((r: any) => r.usage === "makeStruct");
-      const pinConns = results.filter((r: any) => r.usage === "pinConnection");
-
-      const tag = (r: any) => r.isLevelBlueprint ? " Level" : "";
-
-      const lines: string[] = [];
-      lines.push(`Usages of type "${typeName}" (${data.resultCount} result(s)):`);
-
-      if (variables.length) {
-        lines.push(`\nVariables (${variables.length}):`);
-        for (const v of variables) {
-          lines.push(`  [${v.blueprint}${tag(v)}] ${v.location}: ${v.currentType}${v.currentSubtype ? `<${v.currentSubtype}>` : ""}`);
-        }
+      try {
+        const data = await ueGet("/api/search-by-type", params);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (funcParams.length) {
-        lines.push(`\nFunction Parameters (${funcParams.length}):`);
-        for (const p of funcParams) {
-          lines.push(`  [${p.blueprint}${tag(p)}] ${p.location}: ${p.currentType}${p.currentSubtype ? `<${p.currentSubtype}>` : ""}`);
-        }
-      }
-
-      if (eventParams.length) {
-        lines.push(`\nEvent Parameters (${eventParams.length}):`);
-        for (const p of eventParams) {
-          lines.push(`  [${p.blueprint}${tag(p)}] ${p.location}: ${p.currentType}${p.currentSubtype ? `<${p.currentSubtype}>` : ""}`);
-        }
-      }
-
-      if (breakStructs.length) {
-        lines.push(`\nBreak Struct Nodes (${breakStructs.length}):`);
-        for (const n of breakStructs) {
-          lines.push(`  [${n.blueprint}${tag(n)}] ${n.location} (${n.structType})`);
-        }
-      }
-
-      if (makeStructs.length) {
-        lines.push(`\nMake Struct Nodes (${makeStructs.length}):`);
-        for (const n of makeStructs) {
-          lines.push(`  [${n.blueprint}${tag(n)}] ${n.location} (${n.structType})`);
-        }
-      }
-
-      if (pinConns.length) {
-        lines.push(`\nPin Connections (${pinConns.length}):`);
-        for (const p of pinConns) {
-          lines.push(`  [${p.blueprint}${tag(p)}] ${p.graph} > ${p.location} (${p.connectionCount} connection(s))`);
-        }
-      }
-
-      if (results.length === 0) {
-        lines.push(`\nNo usages found.`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -306,65 +218,16 @@ export function registerReadTools(server: McpServer): void {
       tree: z.boolean().optional().default(true).describe("If true (default), format bones as an indented hierarchy tree. If false, return raw JSON."),
       includeTransforms: z.boolean().optional().default(false).describe("Include ref-pose location in tree output (off by default to keep it compact)."),
     },
-    async ({ path, tree, includeTransforms }) => {
+    async ({ path }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/skeleton", { path });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      if (!tree) {
-        return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+      try {
+        const data = await ueGet("/api/skeleton", { path });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const bones: Array<{
-        index: number;
-        name: string;
-        parentIndex: number;
-        parentName: string;
-        locX?: number; locY?: number; locZ?: number;
-      }> = data.bones || [];
-
-      const children = new Map<number, number[]>();
-      for (const b of bones) {
-        const p = b.parentIndex;
-        if (!children.has(p)) children.set(p, []);
-        children.get(p)!.push(b.index);
-      }
-
-      const lines: string[] = [];
-      lines.push(`Skeleton: ${data.name} (${data.path})`);
-      lines.push(`Bones: ${data.boneCount}   Sockets: ${data.socketCount}   Curves: ${data.curveCount}`);
-      lines.push("");
-      lines.push("Bone hierarchy:");
-
-      const walk = (idx: number, depth: number) => {
-        const b = bones[idx];
-        if (!b) return;
-        const indent = "  ".repeat(depth);
-        let suffix = "";
-        if (includeTransforms && b.locX !== undefined) {
-          suffix = `  [loc ${b.locX!.toFixed(2)}, ${b.locY!.toFixed(2)}, ${b.locZ!.toFixed(2)}]`;
-        }
-        lines.push(`${indent}${b.name}${suffix}`);
-        const kids = children.get(idx) || [];
-        for (const k of kids) walk(k, depth + 1);
-      };
-      const roots = children.get(-1) || [];
-      for (const r of roots) walk(r, 0);
-
-      if (data.sockets && data.sockets.length) {
-        lines.push("");
-        lines.push(`Sockets (${data.sockets.length}):`);
-        for (const s of data.sockets) {
-          const loc = (s.locX !== undefined)
-            ? `  loc(${s.locX.toFixed(2)}, ${s.locY.toFixed(2)}, ${s.locZ.toFixed(2)})`
-            : "";
-          lines.push(`  ${s.name} @ ${s.bone}${loc}`);
-        }
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -389,14 +252,14 @@ export function registerReadTools(server: McpServer): void {
     },
     async (args) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/add-skeleton-socket", args);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const verb = data.created ? "Created" : (data.updated ? "Updated" : "No-op");
-      const tag = data.dryRun ? " (dry run)" : (data.saved ? "" : " [NOT SAVED]");
-      return { content: [{ type: "text" as const, text: `${verb} socket '${data.socketName}' @ '${data.bone}' on ${data.skeleton}${tag}` }] };
+      try {
+        const data = await uePost("/api/add-skeleton-socket", args);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -410,13 +273,14 @@ export function registerReadTools(server: McpServer): void {
     },
     async (args) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/remove-skeleton-socket", args);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const tag = data.dryRun ? " (dry run)" : (data.saved ? "" : " [NOT SAVED]");
-      return { content: [{ type: "text" as const, text: `Removed socket '${data.socketName}' from ${data.skeleton}${tag}` }] };
+      try {
+        const data = await uePost("/api/remove-skeleton-socket", args);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -432,25 +296,14 @@ export function registerReadTools(server: McpServer): void {
     },
     async (args) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/copy-skeleton-sockets", args);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      const tag = data.dryRun ? " (dry run)" : (data.saved ? "" : (data.created?.length || data.updated?.length ? " [NOT SAVED]" : ""));
-      lines.push(`copy_skeleton_sockets: ${data.from} → ${data.to}${tag}`);
-      if (data.created?.length) lines.push(`  Created (${data.created.length}): ${data.created.join(", ")}`);
-      if (data.updated?.length) lines.push(`  Updated (${data.updated.length}): ${data.updated.join(", ")}`);
-      if (data.skipped?.length) lines.push(`  Skipped existing (${data.skipped.length}): ${data.skipped.join(", ")}`);
-      if (data.missingBones?.length) {
-        lines.push(`  Missing target bones (${data.missingBones.length}):`);
-        for (const m of data.missingBones) lines.push(`    ${m.socket} expected bone '${m.bone}'`);
+      try {
+        const data = await uePost("/api/copy-skeleton-sockets", args);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      if (!data.created?.length && !data.updated?.length && !data.skipped?.length && !data.missingBones?.length) {
-        lines.push(`  (no sockets to copy)`);
-      }
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

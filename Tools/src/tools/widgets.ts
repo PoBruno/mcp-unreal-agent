@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerWidgetTools(server: McpServer): void {
   // ---------------------------------------------------------------
@@ -14,25 +15,14 @@ export function registerWidgetTools(server: McpServer): void {
     },
     async ({ blueprint }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/list-widget-tree", { blueprint });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Widget Blueprint: ${data.blueprint}`);
-      lines.push(`Root: ${data.rootWidget}`);
-      lines.push(`Widgets (${data.count || 0}):`);
-
-      for (const w of data.widgets || []) {
-        const indent = "  ".repeat((w.depth || 0) + 1);
-        const parent = w.parent ? ` (parent: ${w.parent})` : " [Root]";
-        const panel = w.isPanel ? ` [Panel, ${w.childCount} children]` : "";
-        const slot = w.slotClass ? ` slot:${w.slotClass}` : "";
-        lines.push(`${indent}${w.name}: ${w.class}${parent}${panel}${slot}`);
+      try {
+        const data = await uePost("/api/list-widget-tree", { blueprint });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -48,22 +38,14 @@ export function registerWidgetTools(server: McpServer): void {
     },
     async ({ blueprint, widget }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/get-widget-properties", { blueprint, widget });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Widget: ${data.widget} (${data.widgetClass})`);
-      if (data.slotClass) lines.push(`Slot: ${data.slotClass}`);
-      lines.push(`Properties (${data.propertyCount || 0}):`);
-
-      for (const p of data.properties || []) {
-        const src = p.source === "slot" ? " [slot]" : "";
-        lines.push(`  ${p.name} (${p.type})${src} = ${p.value}`);
+      try {
+        const data = await uePost("/api/get-widget-properties", { blueprint, widget });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -81,29 +63,24 @@ export function registerWidgetTools(server: McpServer): void {
     },
     async ({ blueprint, widgetClass, name, parent }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, widgetClass, name };
       if (parent) body.parent = parent;
 
-      const data = await uePost("/api/add-widget", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Widget added successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Name: ${data.name}`);
-      lines.push(`Class: ${data.widgetClass}`);
-      lines.push(`Parent: ${data.parent}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_widget_tree(blueprint="${blueprint}") — verify the widget hierarchy`);
-      lines.push(`  set_widget_property(blueprint="${blueprint}", widget="${name}", ...) — configure widget properties`);
-      lines.push(`  get_widget_properties(blueprint="${blueprint}", widget="${name}") — see all available properties`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/add-widget", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `list_widget_tree(blueprint="${blueprint}") — verify the widget hierarchy`,
+            `set_widget_property(blueprint="${blueprint}", widget="${name}", ...) — configure widget properties`,
+            `get_widget_properties(blueprint="${blueprint}", widget="${name}") — see all available properties`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -119,28 +96,19 @@ export function registerWidgetTools(server: McpServer): void {
     },
     async ({ blueprint, widget }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/remove-widget", { blueprint, widget });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.existingWidgets?.length) {
-          msg += `\nExisting widgets: ${data.existingWidgets.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/remove-widget", { blueprint, widget });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `list_widget_tree(blueprint="${blueprint}") — verify the widget was removed`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Widget removed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Removed: ${data.widget}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_widget_tree(blueprint="${blueprint}") — verify the widget was removed`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -158,23 +126,19 @@ export function registerWidgetTools(server: McpServer): void {
     },
     async ({ blueprint, widget, property, value }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-widget-property", { blueprint, widget, property, value });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Property set successfully.`);
-      lines.push(`Widget: ${data.widget}`);
-      lines.push(`Property: ${data.property} (${data.source})`);
-      lines.push(`Value: ${data.value}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  get_widget_properties(blueprint="${blueprint}", widget="${widget}") — verify the change`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-widget-property", { blueprint, widget, property, value });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `get_widget_properties(blueprint="${blueprint}", widget="${widget}") — verify the change`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -191,23 +155,19 @@ export function registerWidgetTools(server: McpServer): void {
     },
     async ({ blueprint, widget, newParent }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/move-widget", { blueprint, widget, newParent });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Widget moved successfully.`);
-      lines.push(`Widget: ${data.widget}`);
-      lines.push(`From: ${data.oldParent}`);
-      lines.push(`To: ${data.newParent}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_widget_tree(blueprint="${blueprint}") — verify the new hierarchy`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/move-widget", { blueprint, widget, newParent });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `list_widget_tree(blueprint="${blueprint}") — verify the new hierarchy`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -223,26 +183,23 @@ export function registerWidgetTools(server: McpServer): void {
     },
     async ({ name, packagePath }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { name };
       if (packagePath) body.packagePath = packagePath;
 
-      const data = await uePost("/api/create-widget-blueprint", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Widget Blueprint created successfully.`);
-      lines.push(`Name: ${data.name}`);
-      lines.push(`Path: ${data.fullPath}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  add_widget(blueprint="${name}", widgetClass="CanvasPanel", name="RootCanvas") — add a root panel`);
-      lines.push(`  list_widget_tree(blueprint="${name}") — view the widget hierarchy`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-widget-blueprint", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `add_widget(blueprint="${name}", widgetClass="CanvasPanel", name="RootCanvas") — add a root panel`,
+            `list_widget_tree(blueprint="${name}") — view the widget hierarchy`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

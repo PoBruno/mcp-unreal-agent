@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost, ueGet } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerMaterialMutationTools(server: McpServer): void {
   // ---------------------------------------------------------------------------
@@ -19,29 +20,26 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ name, packagePath, domain, blendMode, twoSided }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { name, packagePath };
       if (domain) body.domain = domain;
       if (blendMode) body.blendMode = blendMode;
       if (twoSided !== undefined) body.twoSided = twoSided;
 
-      const data = await uePost("/api/create-material", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Created material ${data.name || name} at ${data.packagePath || packagePath}`);
-      if (data.domain) lines.push(`Domain: ${data.domain}`);
-      if (data.blendMode) lines.push(`Blend mode: ${data.blendMode}`);
-      if (data.twoSided !== undefined) lines.push(`Two-sided: ${data.twoSided}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use add_material_expression to add nodes to the material graph`);
-      lines.push(`  2. Use connect_material_pins to wire expressions together`);
-      lines.push(`  3. Use set_material_property to adjust material settings`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-material", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use add_material_expression to add nodes to the material graph",
+            "use connect_material_pins to wire expressions together",
+            "use set_material_property to adjust material settings",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -56,27 +54,20 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, property, value, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { material, property, value };
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/set-material-property", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Material: ${data.material || material}`);
-      lines.push(`Property: ${data.property || property}`);
-      lines.push(`Old value: ${data.oldValue ?? "(empty)"} -> New value: ${data.newValue ?? value}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_graph to verify the changes`);
+      try {
+        const data = await uePost("/api/set-material-property", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : ["use get_material_graph to verify the changes"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -94,10 +85,10 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, materialFunction, expressionClass, posX, posY, name, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
-      if (material && materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction', not both" }] };
+      if (!material && !materialFunction) return toMcp(fail("INVALID_PARAMS", "Provide either 'material' or 'materialFunction'"));
+      if (material && materialFunction) return toMcp(fail("INVALID_PARAMS", "Provide either 'material' or 'materialFunction', not both"));
 
       const body: Record<string, any> = { expressionClass, posX, posY };
       if (material) body.material = material;
@@ -105,32 +96,18 @@ export function registerMaterialMutationTools(server: McpServer): void {
       if (name) body.name = name;
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/add-material-expression", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Expression added: ${data.expressionClass || expressionClass}`);
-      lines.push(`Material: ${data.material || material}`);
-      if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
-      if (data.posX !== undefined && data.posY !== undefined) lines.push(`Position: (${data.posX}, ${data.posY})`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (data.pins?.length) {
-        lines.push(`\nPins:`);
-        for (const pin of data.pins) {
-          const dir = pin.direction === "Output" ? "\u2192" : "\u2190";
-          lines.push(`  ${dir} ${pin.name}: ${pin.type}${pin.subtype ? ` (${pin.subtype})` : ""}`);
-        }
+      try {
+        const data = await uePost("/api/add-material-expression", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : [
+            "use set_expression_value to configure the expression",
+            "use connect_material_pins to wire it to other nodes",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use set_expression_value to configure the expression`);
-        lines.push(`  2. Use connect_material_pins to wire it to other nodes`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -145,33 +122,24 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, materialFunction, nodeId, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+      if (!material && !materialFunction) return toMcp(fail("INVALID_PARAMS", "Provide either 'material' or 'materialFunction'"));
 
       const body: Record<string, any> = { nodeId };
       if (material) body.material = material;
       if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/delete-material-expression", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Expression deleted.`);
-      lines.push(`Material: ${data.material || material}`);
-      if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
-      if (data.expressionClass) lines.push(`Expression class: ${data.expressionClass}`);
-      if (data.disconnectedPins !== undefined) lines.push(`Disconnected pins: ${data.disconnectedPins}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_graph to verify the changes`);
+      try {
+        const data = await uePost("/api/delete-material-expression", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : ["use get_material_graph to verify the changes"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -189,37 +157,24 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, materialFunction, sourceNodeId, sourcePinName, targetNodeId, targetPinName, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+      if (!material && !materialFunction) return toMcp(fail("INVALID_PARAMS", "Provide either 'material' or 'materialFunction'"));
 
       const body: Record<string, any> = { sourceNodeId, sourcePinName, targetNodeId, targetPinName };
       if (material) body.material = material;
       if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/connect-material-pins", body);
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availablePins) {
-          msg += `\nAvailable pins: ${data.availablePins.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/connect-material-pins", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : ["use get_material_graph to verify the connection"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Connection ${data.success ? "succeeded" : "failed"}.`);
-      lines.push(`Material: ${data.material || material}`);
-      lines.push(`${sourcePinName} \u2192 ${targetPinName}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_graph to verify the connection`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -235,30 +190,24 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, materialFunction, nodeId, pinName, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+      if (!material && !materialFunction) return toMcp(fail("INVALID_PARAMS", "Provide either 'material' or 'materialFunction'"));
 
       const body: Record<string, any> = { nodeId, pinName };
       if (material) body.material = material;
       if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/disconnect-material-pin", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Disconnected ${data.disconnectedCount ?? 0} link(s).`);
-      lines.push(`Material: ${data.material || material}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_graph to verify the changes`);
+      try {
+        const data = await uePost("/api/disconnect-material-pin", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : ["use get_material_graph to verify the changes"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -280,9 +229,9 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, materialFunction, nodeId, value, parameterName, code, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+      if (!material && !materialFunction) return toMcp(fail("INVALID_PARAMS", "Provide either 'material' or 'materialFunction'"));
 
       const body: Record<string, any> = { nodeId, value };
       if (material) body.material = material;
@@ -291,25 +240,15 @@ export function registerMaterialMutationTools(server: McpServer): void {
       if (code) body.code = code;
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/set-expression-value", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Expression value set.`);
-      lines.push(`Material: ${data.material || material}`);
-      if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
-      if (data.expressionClass) lines.push(`Expression class: ${data.expressionClass}`);
-      if (data.oldValue !== undefined) lines.push(`Old value: ${typeof data.oldValue === "object" ? JSON.stringify(data.oldValue) : data.oldValue}`);
-      if (data.newValue !== undefined) lines.push(`New value: ${typeof data.newValue === "object" ? JSON.stringify(data.newValue) : data.newValue}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_graph to verify the changes`);
+      try {
+        const data = await uePost("/api/set-expression-value", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : ["use get_material_graph to verify the changes"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -326,31 +265,21 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, materialFunction, nodeId, posX, posY, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      if (!material && !materialFunction) return { content: [{ type: "text" as const, text: "Error: Provide either 'material' or 'materialFunction'" }] };
+      if (!material && !materialFunction) return toMcp(fail("INVALID_PARAMS", "Provide either 'material' or 'materialFunction'"));
 
       const body: Record<string, any> = { nodeId, posX, posY };
       if (material) body.material = material;
       if (materialFunction) body.materialFunction = materialFunction;
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/move-material-expression", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Expression repositioned.`);
-      lines.push(`Material: ${data.material || material}`);
-      if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
-      if (data.oldPosX !== undefined && data.oldPosY !== undefined) {
-        lines.push(`Position: (${data.oldPosX}, ${data.oldPosY}) -> (${data.newPosX ?? posX}, ${data.newPosY ?? posY})`);
-      } else {
-        lines.push(`Position: (${data.newPosX ?? posX}, ${data.newPosY ?? posY})`);
+      try {
+        const data = await uePost("/api/move-material-expression", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -368,23 +297,22 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ name, packagePath, parentMaterial }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { name, packagePath, parentMaterial };
 
-      const data = await uePost("/api/create-material-instance", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Created material instance ${data.name || name} at ${data.packagePath || packagePath}`);
-      if (data.parentMaterial) lines.push(`Parent: ${data.parentMaterial}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use set_material_instance_parameter to override parameter values`);
-      lines.push(`  2. Use get_material_instance_parameters to inspect available parameters`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-material-instance", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use set_material_instance_parameter to override parameter values",
+            "use get_material_instance_parameters to inspect available parameters",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -405,31 +333,21 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ materialInstance, parameterName, value, type, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { materialInstance, parameterName, value };
       if (type) body.type = type;
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/set-material-instance-parameter", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Parameter override set.`);
-      lines.push(`Material Instance: ${data.materialInstance || materialInstance}`);
-      lines.push(`Parameter: ${data.parameterName || parameterName}`);
-      if (data.type) lines.push(`Type: ${data.type}`);
-      if (data.oldValue !== undefined) lines.push(`Old value: ${typeof data.oldValue === "object" ? JSON.stringify(data.oldValue) : data.oldValue}`);
-      if (data.newValue !== undefined) lines.push(`New value: ${typeof data.newValue === "object" ? JSON.stringify(data.newValue) : data.newValue}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_instance_parameters to verify all overrides`);
+      try {
+        const data = await uePost("/api/set-material-instance-parameter", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : ["use get_material_instance_parameters to verify all overrides"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -441,62 +359,14 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await ueGet("/api/material-instance-params", { name });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Material Instance: ${data.name || name}`);
-      if (data.parentMaterial) lines.push(`Parent: ${data.parentMaterial}`);
-      if (data.parentChain?.length) {
-        lines.push(`Parent chain: ${data.parentChain.join(" -> ")}`);
+      try {
+        const data = await ueGet("/api/material-instance-params", { name });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const formatParamValue = (val: any): string => {
-        if (val === undefined || val === null) return "(default)";
-        if (typeof val === "object") return JSON.stringify(val);
-        return String(val);
-      };
-
-      if (data.scalarParameters?.length) {
-        lines.push(`\nScalar Parameters:`);
-        for (const p of data.scalarParameters) {
-          const override = p.overridden ? " [OVERRIDDEN]" : "";
-          lines.push(`  ${p.name}: ${formatParamValue(p.value)}${override}`);
-        }
-      }
-
-      if (data.vectorParameters?.length) {
-        lines.push(`\nVector Parameters:`);
-        for (const p of data.vectorParameters) {
-          const override = p.overridden ? " [OVERRIDDEN]" : "";
-          lines.push(`  ${p.name}: ${formatParamValue(p.value)}${override}`);
-        }
-      }
-
-      if (data.textureParameters?.length) {
-        lines.push(`\nTexture Parameters:`);
-        for (const p of data.textureParameters) {
-          const override = p.overridden ? " [OVERRIDDEN]" : "";
-          lines.push(`  ${p.name}: ${formatParamValue(p.value)}${override}`);
-        }
-      }
-
-      if (data.staticSwitchParameters?.length) {
-        lines.push(`\nStatic Switch Parameters:`);
-        for (const p of data.staticSwitchParameters) {
-          const override = p.overridden ? " [OVERRIDDEN]" : "";
-          lines.push(`  ${p.name}: ${formatParamValue(p.value)}${override}`);
-        }
-      }
-
-      if (!data.scalarParameters?.length && !data.vectorParameters?.length &&
-          !data.textureParameters?.length && !data.staticSwitchParameters?.length) {
-        lines.push(`\nNo parameters found.`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -510,29 +380,23 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ materialInstance, newParent, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { materialInstance, newParent };
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/reparent-material-instance", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Material Instance reparented.`);
-      lines.push(`Material Instance: ${data.materialInstance || materialInstance}`);
-      if (data.oldParent) lines.push(`Old parent: ${data.oldParent}`);
-      lines.push(`New parent: ${data.newParent || newParent}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_instance_parameters to check parameter compatibility`);
-        lines.push(`  2. Use set_material_instance_parameter to update overrides if needed`);
+      try {
+        const data = await uePost("/api/reparent-material-instance", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : [
+            "use get_material_instance_parameters to check parameter compatibility",
+            "use set_material_instance_parameter to update overrides if needed",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -550,24 +414,23 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ name, packagePath, description }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { name, packagePath };
       if (description) body.description = description;
 
-      const data = await uePost("/api/create-material-function", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Created material function ${data.name || name} at ${data.packagePath || packagePath}`);
-      if (data.description) lines.push(`Description: ${data.description}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use add_material_expression to add expression nodes to the function`);
-      lines.push(`  2. Use connect_material_pins to wire expressions together`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-material-function", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use add_material_expression to add expression nodes to the function",
+            "use connect_material_pins to wire expressions together",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -583,22 +446,21 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/snapshot-material-graph", { material });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Snapshot ${data.snapshotId} created for material ${data.material || material}`);
-      if (data.expressionCount !== undefined) lines.push(`Expressions captured: ${data.expressionCount}`);
-      if (data.connectionCount !== undefined) lines.push(`Connections captured: ${data.connectionCount}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Make your changes to the material`);
-      lines.push(`  2. Use diff_material_graph to see what changed`);
-      lines.push(`  3. Use restore_material_graph to reconnect severed pins`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/snapshot-material-graph", { material });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "make your changes to the material",
+            "use diff_material_graph to see what changed",
+            "use restore_material_graph to reconnect severed pins",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -611,59 +473,19 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, snapshotId }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/diff-material-graph", { material, snapshotId });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`# Diff: ${data.material || material} vs ${data.snapshotId || snapshotId}`);
-
-      if (data.severedConnections?.length) {
-        lines.push(`\nSevered connections (${data.severedConnections.length}):`);
-        for (const sc of data.severedConnections) {
-          lines.push(`  ${sc.sourceNodeTitle || sc.sourceNodeId}.${sc.sourcePinName} was -> ${sc.targetNodeTitle || sc.targetNodeId}.${sc.targetPinName}`);
-        }
+      try {
+        const data = await uePost("/api/diff-material-graph", { material, snapshotId });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: data?.severedConnections?.length
+            ? ["use restore_material_graph to reconnect severed pins"]
+            : undefined,
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.newConnections?.length) {
-        lines.push(`\nNew connections (${data.newConnections.length}):`);
-        for (const nc of data.newConnections) {
-          lines.push(`  ${nc.sourceNodeTitle || nc.sourceNodeId}.${nc.sourcePinName} -> ${nc.targetNodeTitle || nc.targetNodeId}.${nc.targetPinName}`);
-        }
-      }
-
-      if (data.missingNodes?.length) {
-        lines.push(`\nMissing nodes (${data.missingNodes.length}):`);
-        for (const mn of data.missingNodes) {
-          lines.push(`  ${mn.nodeId} (${mn.nodeTitle || mn.expressionClass || "unknown"})`);
-        }
-      }
-
-      if (data.newNodes?.length) {
-        lines.push(`\nNew nodes (${data.newNodes.length}):`);
-        for (const nn of data.newNodes) {
-          lines.push(`  ${nn.nodeId} (${nn.nodeTitle || nn.expressionClass || "unknown"})`);
-        }
-      }
-
-      if (!data.severedConnections?.length && !data.newConnections?.length &&
-          !data.missingNodes?.length && !data.newNodes?.length) {
-        lines.push(`\nNo changes detected.`);
-      }
-
-      if (data.summary) {
-        lines.push(`\nSummary: ${data.summary.severed ?? 0} severed, ${data.summary.new ?? 0} new connections, ${data.summary.missingNodes ?? 0} missing nodes`);
-      }
-
-      lines.push(`\nNext steps:`);
-      if (data.severedConnections?.length) {
-        lines.push(`  1. Use restore_material_graph to reconnect severed pins`);
-      } else {
-        lines.push(`  1. No action needed \u2014 graph is intact`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -677,46 +499,21 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material, snapshotId, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { material, snapshotId };
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/restore-material-graph", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]\n`);
-
-      lines.push(`Restore: ${data.material || material} from ${data.snapshotId || snapshotId}`);
-      lines.push(`Reconnected: ${data.reconnected ?? 0}/${(data.reconnected ?? 0) + (data.failed ?? 0)}`);
-      if ((data.failed ?? 0) > 0) {
-        lines.push(`Failed: ${data.failed}`);
+      try {
+        const data = await uePost("/api/restore-material-graph", body);
+        const nextSteps: string[] = [];
+        if (dryRun) nextSteps.push("re-run restore_material_graph without dryRun to apply changes");
+        if ((data?.failed ?? 0) > 0) nextSteps.push("fix failed reconnection(s) manually with connect_material_pins");
+        nextSteps.push("use get_material_graph to verify the final state");
+        return toMcp(wrapRaw(data, { refs: autoRefs(data), nextSteps }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.details?.length) {
-        lines.push(`\nDetails:`);
-        for (const d of data.details) {
-          const status = d.result === "ok" ? "OK" : "FAILED";
-          const reason = d.reason ? ` (${d.reason})` : "";
-          lines.push(`  ${status}: ${d.sourcePinName} -> ${d.targetNodeTitle || d.targetNodeId}.${d.targetPinName}${reason}`);
-        }
-      }
-
-      if (!dryRun && data.saved !== undefined) {
-        lines.push(`\nSaved: ${data.saved}`);
-      }
-
-      lines.push(`\nNext steps:`);
-      if (dryRun) {
-        lines.push(`  1. Re-run restore_material_graph without dryRun to apply changes`);
-      }
-      if ((data.failed ?? 0) > 0) {
-        lines.push(`  1. Fix ${data.failed} failed reconnection(s) manually with connect_material_pins`);
-      }
-      lines.push(`  2. Use get_material_graph to verify the final state`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -732,33 +529,20 @@ export function registerMaterialMutationTools(server: McpServer): void {
     },
     async ({ material }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/validate-material", { material });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Material: ${data.material || material}`);
-      lines.push(`Valid: ${data.valid ? "Yes" : "No"}`);
-      lines.push(`Expressions: ${data.expressionCount ?? 0}`);
-      lines.push(`Connections: ${data.connectionCount ?? 0}`);
-
-      if (data.errors?.length) {
-        lines.push(`\nCompilation errors (${data.errorCount}):`);
-        for (const e of data.errors) {
-          lines.push(`  - ${e}`);
-        }
+      try {
+        const data = await uePost("/api/validate-material", { material });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: data?.valid ? undefined : [
+            "use get_material_graph to inspect the graph",
+            "fix the errors and re-validate",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.valid) {
-        lines.push(`\nMaterial compiled successfully.`);
-      } else {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use get_material_graph to inspect the graph`);
-        lines.push(`  2. Fix the errors and re-validate`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

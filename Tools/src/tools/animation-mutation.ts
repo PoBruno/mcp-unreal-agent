@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerAnimationTools(server: McpServer): void {
   // ---------------------------------------------------------------------------
@@ -18,28 +19,24 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ name, packagePath, skeleton, parentClass }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { name, packagePath, skeleton };
       if (parentClass) body.parentClass = parentClass;
 
-      const data = await uePost("/api/create-anim-blueprint", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Created Animation Blueprint: ${data.blueprintName || name}`);
-      lines.push(`Path: ${data.assetPath || packagePath}`);
-      lines.push(`Skeleton: ${data.targetSkeleton || skeleton}`);
-      lines.push(`Parent: ${data.parentClass || "AnimInstance"}`);
-      if (data.graphs?.length) lines.push(`Graphs: ${data.graphs.join(", ")}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use add_state_machine to add state machines to the AnimGraph`);
-      lines.push(`  2. Use add_anim_state to add states to a state machine`);
-      lines.push(`  3. Use add_anim_transition to connect states with transitions`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-anim-blueprint", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use add_state_machine to add state machines to the AnimGraph",
+            "use add_anim_state to add states to a state machine",
+            "use add_anim_transition to connect states with transitions",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -60,26 +57,25 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, stateName, animationAsset, posX, posY }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, graph, stateName };
       if (animationAsset) body.animationAsset = animationAsset;
       if (posX !== undefined) body.posX = posX;
       if (posY !== undefined) body.posY = posY;
 
-      const data = await uePost("/api/add-anim-state", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Added state "${data.stateName || stateName}" to ${data.graph || graph}`);
-      lines.push(`Node ID: ${data.nodeId}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use add_anim_transition to connect this state to other states`);
-      lines.push(`  2. Use set_state_animation to assign an animation to this state`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/add-anim-state", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use add_anim_transition to connect this state to other states",
+            "use set_state_animation to assign an animation to this state",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -97,17 +93,14 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, stateName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/remove-anim-state", { blueprint, graph, stateName });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Removed state "${data.removedState || stateName}"`);
-      lines.push(`Removed transitions: ${data.removedTransitions ?? 0}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/remove-anim-state", { blueprint, graph, stateName });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -129,28 +122,22 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, fromState, toState, crossfadeDuration, priority, bBidirectional }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, graph, fromState, toState };
       if (crossfadeDuration !== undefined) body.crossfadeDuration = crossfadeDuration;
       if (priority !== undefined) body.priority = priority;
       if (bBidirectional !== undefined) body.bBidirectional = bBidirectional;
 
-      const data = await uePost("/api/add-anim-transition", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Added transition: ${data.fromState || fromState} → ${data.toState || toState}`);
-      lines.push(`Node ID: ${data.nodeId}`);
-      lines.push(`Crossfade: ${data.crossfadeDuration ?? 0.2}s`);
-      lines.push(`Priority: ${data.priorityOrder ?? 1}`);
-      if (data.bBidirectional) lines.push(`Bidirectional: true`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use set_transition_rule to configure crossfade and priority`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/add-anim-transition", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["use set_transition_rule to configure crossfade and priority"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -174,7 +161,7 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, fromState, toState, crossfadeDuration, blendMode, priorityOrder, logicType, bBidirectional }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, graph, fromState, toState };
       if (crossfadeDuration !== undefined) body.crossfadeDuration = crossfadeDuration;
@@ -183,18 +170,12 @@ export function registerAnimationTools(server: McpServer): void {
       if (logicType !== undefined) body.logicType = logicType;
       if (bBidirectional !== undefined) body.bBidirectional = bBidirectional;
 
-      const data = await uePost("/api/set-transition-rule", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Updated transition: ${data.fromState || fromState} → ${data.toState || toState}`);
-      lines.push(`Properties changed: ${data.propertiesChanged ?? 0}`);
-      lines.push(`Crossfade: ${data.crossfadeDuration}s (blendMode: ${data.blendMode})`);
-      lines.push(`Priority: ${data.priorityOrder}`);
-      lines.push(`Bidirectional: ${data.bBidirectional}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-transition-rule", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -215,7 +196,7 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, nodeType, animationAsset, posX, posY }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, nodeType };
       if (graph) body.graph = graph;
@@ -223,22 +204,18 @@ export function registerAnimationTools(server: McpServer): void {
       if (posX !== undefined) body.posX = posX;
       if (posY !== undefined) body.posY = posY;
 
-      const data = await uePost("/api/add-anim-node", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Added ${data.nodeType || nodeType} node to ${data.graph || graph || "AnimGraph"}`);
-      lines.push(`Node ID: ${data.nodeId}`);
-      if (data.stateMachineGraph) lines.push(`State machine sub-graph: ${data.stateMachineGraph}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (nodeType === "StateMachine") {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Use add_anim_state to add states to ${data.stateMachineGraph}`);
-        lines.push(`  2. Use add_anim_transition to connect states`);
+      try {
+        const data = await uePost("/api/add-anim-node", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: nodeType === "StateMachine" ? [
+            "use add_anim_state to add states to the state machine sub-graph",
+            "use add_anim_transition to connect states",
+          ] : undefined,
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -257,26 +234,22 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, name, posX, posY }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint };
       if (name) body.name = name;
       if (posX !== undefined) body.posX = posX;
       if (posY !== undefined) body.posY = posY;
 
-      const data = await uePost("/api/add-state-machine", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Added state machine to AnimGraph`);
-      lines.push(`Node ID: ${data.nodeId}`);
-      if (data.stateMachineGraph) lines.push(`Sub-graph: ${data.stateMachineGraph}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use add_anim_state to add states to ${data.stateMachineGraph || "the state machine"}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/add-state-machine", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["use add_anim_state to add states to the state machine sub-graph"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -295,18 +268,14 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, stateName, animationAsset }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-state-animation", { blueprint, graph, stateName, animationAsset });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Set animation for state "${data.stateName || stateName}"`);
-      lines.push(`Animation: ${data.animationAsset || animationAsset}`);
-      lines.push(`Created new node: ${data.createdNewNode ?? false}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-state-animation", { blueprint, graph, stateName, animationAsset });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -324,21 +293,20 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ name, packagePath, skeleton }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/create-blend-space", { name, packagePath, skeleton });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Created Blend Space: ${data.assetPath || `${packagePath}/${name}`}`);
-      lines.push(`Skeleton: ${data.skeleton || skeleton}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use set_blend_space_samples to add animation samples at X/Y coordinates`);
-      lines.push(`  2. Use set_state_blend_space to wire it into an anim state`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/create-blend-space", { name, packagePath, skeleton });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use set_blend_space_samples to add animation samples at X/Y coordinates",
+            "use set_state_blend_space to wire it into an anim state",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -365,7 +333,7 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blendSpace, axisXName, axisXMin, axisXMax, axisYName, axisYMin, axisYMax, samples }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blendSpace, samples };
       if (axisXName !== undefined) body.axisXName = axisXName;
@@ -375,14 +343,12 @@ export function registerAnimationTools(server: McpServer): void {
       if (axisYMin !== undefined) body.axisYMin = axisYMin;
       if (axisYMax !== undefined) body.axisYMax = axisYMax;
 
-      const data = await uePost("/api/set-blend-space-samples", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Set ${data.samplesSet ?? samples.length} samples on ${data.blendSpace || blendSpace}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-blend-space-samples", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -403,22 +369,18 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, stateName, blendSpace, xVariable, yVariable }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, graph, stateName, blendSpace };
       if (xVariable) body.xVariable = xVariable;
       if (yVariable) body.yVariable = yVariable;
 
-      const data = await uePost("/api/set-state-blend-space", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Set blend space for state "${data.stateName || stateName}"`);
-      lines.push(`Blend Space: ${data.blendSpace || blendSpace}`);
-      lines.push(`Node ID: ${data.nodeId}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-state-blend-space", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -434,22 +396,14 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/list-anim-slots", { blueprint });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Animation slots in ${data.blueprint || blueprint}: ${data.count ?? 0}`);
-      if (data.slots?.length) {
-        for (const slot of data.slots) {
-          lines.push(`  ${slot}`);
-        }
-      } else {
-        lines.push(`  (no slots found)`);
+      try {
+        const data = await uePost("/api/list-anim-slots", { blueprint });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -465,22 +419,14 @@ export function registerAnimationTools(server: McpServer): void {
     },
     async ({ blueprint }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/list-sync-groups", { blueprint });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Sync groups in ${data.blueprint || blueprint}: ${data.count ?? 0}`);
-      if (data.syncGroups?.length) {
-        for (const group of data.syncGroups) {
-          lines.push(`  ${group}`);
-        }
-      } else {
-        lines.push(`  (no sync groups found)`);
+      try {
+        const data = await uePost("/api/list-sync-groups", { blueprint });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerInterfaceTools(server: McpServer): void {
   server.tool(
@@ -11,27 +12,14 @@ export function registerInterfaceTools(server: McpServer): void {
     },
     async ({ blueprint }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/list-interfaces", { blueprint });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Interfaces implemented: ${data.count}`);
-
-      if (data.interfaces?.length) {
-        lines.push(``);
-        for (const iface of data.interfaces) {
-          lines.push(`  ${iface.name}`);
-          lines.push(`    Class path: ${iface.classPath}`);
-          if (iface.functions?.length) {
-            lines.push(`    Functions: ${iface.functions.join(", ")}`);
-          }
-        }
+      try {
+        const data = await uePost("/api/list-interfaces", { blueprint });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -44,27 +32,21 @@ export function registerInterfaceTools(server: McpServer): void {
     },
     async ({ blueprint, interfaceName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/add-interface", { blueprint, interfaceName });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Interface added successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Interface: ${data.interfaceName}`);
-      lines.push(`Interface path: ${data.interfacePath}`);
-      if (data.functionGraphsAdded?.length) {
-        lines.push(`Function stubs created: ${data.functionGraphsAdded.join(", ")}`);
+      try {
+        const data = await uePost("/api/add-interface", { blueprint, interfaceName });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `list_interfaces(blueprint="${blueprint}") to verify the interface was added`,
+            `get_blueprint_graph(blueprint="${blueprint}", graph="<functionName>") to inspect a function stub`,
+            `add_node(blueprint="${blueprint}", graph="<functionName>", ...) to add logic to a function stub`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_interfaces(blueprint="${blueprint}") — verify the interface was added`);
-      lines.push(`  get_blueprint_graph(blueprint="${blueprint}", graph="<functionName>") — inspect a function stub`);
-      lines.push(`  add_node(blueprint="${blueprint}", graph="<functionName>", ...) — add logic to a function stub`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -78,31 +60,20 @@ export function registerInterfaceTools(server: McpServer): void {
     },
     async ({ blueprint, interfaceName, preserveFunctions }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, interfaceName };
       if (preserveFunctions !== undefined) body.preserveFunctions = preserveFunctions;
 
-      const data = await uePost("/api/remove-interface", body);
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.implementedInterfaces?.length) {
-          msg += `\nImplemented interfaces: ${data.implementedInterfaces.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/remove-interface", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [`list_interfaces(blueprint="${blueprint}") to verify the interface was removed`],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Interface removed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Interface: ${data.interfaceName}`);
-      lines.push(`Functions preserved: ${data.preservedFunctions}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_interfaces(blueprint="${blueprint}") — verify the interface was removed`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

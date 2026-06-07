@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
-import { TYPE_NAME_DOCS, formatUpdatedState } from "../helpers.js";
+import { TYPE_NAME_DOCS } from "../helpers.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerParamTools(server: McpServer): void {
   server.tool(
@@ -22,59 +23,25 @@ export function registerParamTools(server: McpServer): void {
     },
     async ({ blueprint, functionName, paramName, newType, dryRun, batch }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = batch
         ? { batch }
         : { blueprint, functionName, paramName, newType };
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/change-function-param-type", body);
-
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableParams) {
-          msg += `\nAvailable parameters: ${data.availableParams.join(", ")}`;
-        }
-        if (data.availableFunctionsAndEvents) {
-          msg += `\nAvailable functions/events: ${data.availableFunctionsAndEvents.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/change-function-param-type", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : [
+            "check delegate graphs that bind to this function/event",
+            "run refresh_all_nodes to propagate pin changes downstream",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-
-      if (data.results) {
-        // Batch response
-        lines.push(`Batch parameter type change: ${data.results.length} operation(s)`);
-        for (const r of data.results) {
-          if (r.error) {
-            lines.push(`  FAILED ${r.blueprint}.${r.functionName}.${r.paramName}: ${r.error}`);
-          } else {
-            lines.push(`  OK ${r.blueprint}.${r.functionName}.${r.paramName} \u2192 ${r.newType}`);
-          }
-        }
-      } else {
-        lines.push(`Parameter type changed successfully.`);
-        lines.push(`Blueprint: ${data.blueprint}`);
-        lines.push(`${data.nodeType}: ${data.functionName}`);
-        lines.push(`Parameter: ${data.paramName} \u2192 ${data.newType}`);
-        lines.push(`Node ID: ${data.nodeId}`);
-        lines.push(`Saved: ${data.saved}`);
-      }
-
-      // Updated state (#11)
-      lines.push(...formatUpdatedState(data));
-
-      // Tool chaining hints (#12)
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Check delegate graphs that bind to this function/event`);
-        lines.push(`  2. Run refresh_all_nodes to propagate pin changes downstream`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -88,32 +55,16 @@ export function registerParamTools(server: McpServer): void {
     },
     async ({ blueprint, functionName, paramName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/remove-function-parameter", {
-        blueprint, functionName, paramName,
-      });
-
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableParams) {
-          msg += `\nAvailable parameters: ${data.availableParams.join(", ")}`;
-        }
-        if (data.availableFunctionsAndEvents) {
-          msg += `\nAvailable functions/events: ${data.availableFunctionsAndEvents.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/remove-function-parameter", {
+          blueprint, functionName, paramName,
+        });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Parameter removed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`${data.nodeType}: ${data.functionName}`);
-      lines.push(`Removed parameter: ${data.paramName}`);
-      lines.push(`Node ID: ${data.nodeId}`);
-      lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -128,31 +79,22 @@ export function registerParamTools(server: McpServer): void {
     },
     async ({ blueprint, functionName, paramName, paramType }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/add-function-parameter", {
-        blueprint, functionName, paramName, paramType,
-      });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.availableFunctions?.length) {
-          msg += `\nAvailable functions/events/dispatchers:\n  ${data.availableFunctions.join("\n  ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/add-function-parameter", {
+          blueprint, functionName, paramName, paramType,
+        });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "get_blueprint_graph to inspect the updated signature",
+            "add_function_parameter to add another parameter",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Parameter added successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Function: ${data.functionName} (${data.nodeType})`);
-      lines.push(`Parameter: ${data.paramName}: ${data.paramType}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  get_blueprint_graph(blueprint="${blueprint}", graph="${functionName}") — inspect the updated signature`);
-      lines.push(`  add_function_parameter(blueprint="${blueprint}", functionName="${functionName}", ...) — add another parameter`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

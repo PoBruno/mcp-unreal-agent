@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, ueGet, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerLevelTools(server: McpServer): void {
   server.tool(
@@ -9,34 +10,16 @@ export function registerLevelTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
-
-      const data = await ueGet("/api/selected-actors", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-
-      if (!data.count) {
-        lines.push("No actors selected.");
-        lines.push("");
-        lines.push("Select one or more actors in the viewport, then call this tool again.");
-      } else {
-        lines.push(`Selected actors (${data.count}):`);
-        for (const a of data.actors || []) {
-          const loc = a.location;
-          const rot = a.rotation;
-          lines.push(`  ${a.label} (${a.class})${a.folder ? ` [${a.folder}]` : ""}`);
-          lines.push(`    Location: (${loc.x?.toFixed(1)}, ${loc.y?.toFixed(1)}, ${loc.z?.toFixed(1)}) cm`);
-          lines.push(`    Rotation: pitch=${rot.pitch?.toFixed(1)} yaw=${rot.yaw?.toFixed(1)} roll=${rot.roll?.toFixed(1)}`);
-        }
-        lines.push("");
-        lines.push("Next steps:");
-        for (const a of data.actors || []) {
-          lines.push(`  get_actor_properties(label="${a.label}") — inspect properties`);
-        }
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
+      try {
+        const data = await ueGet("/api/selected-actors", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["call get_actor_properties for a selected actor to inspect properties"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -46,17 +29,13 @@ export function registerLevelTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
-
-      const data = await ueGet("/api/current-level", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Level: ${data.levelName}`);
-      lines.push(`Package: ${data.packageName}`);
-      lines.push(`Actor count: ${data.actorCount}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
+      try {
+        const data = await ueGet("/api/current-level", {});
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -70,27 +49,19 @@ export function registerLevelTools(server: McpServer): void {
     },
     async ({ classFilter, nameFilter, folder }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const params: Record<string, string> = {};
       if (classFilter) params.classFilter = classFilter;
       if (nameFilter)  params.nameFilter  = nameFilter;
       if (folder)      params.folder      = folder;
 
-      const data = await ueGet("/api/list-actors", params);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Level: ${data.level}`);
-      lines.push(`Actors (${data.count || 0}):`);
-
-      for (const a of data.actors || []) {
-        const loc = a.location ? ` @ (${a.location.x?.toFixed(1)}, ${a.location.y?.toFixed(1)}, ${a.location.z?.toFixed(1)})` : "";
-        const folder = a.folder ? ` [${a.folder}]` : "";
-        lines.push(`  ${a.label}: ${a.class}${loc}${folder}`);
+      try {
+        const data = await ueGet("/api/list-actors", params);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -103,57 +74,20 @@ export function registerLevelTools(server: McpServer): void {
     },
     async ({ label, component }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const params: Record<string, string> = { label };
       if (component) params.component = component;
 
-      const data = await ueGet("/api/actor-properties", params);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-
-      const formatProps = (props: any[]) => {
-        let lastStruct = "";
-        for (const p of props) {
-          const def = p.isDefault ? " (default)" : "";
-          if (p.struct) {
-            // Struct sub-field: group under struct header
-            if (p.struct !== lastStruct) {
-              lines.push(`  [${p.struct}]`);
-              lastStruct = p.struct;
-            }
-            lines.push(`    ${p.name} [${p.type}] = ${p.value}${def}`);
-          } else {
-            lastStruct = "";
-            lines.push(`  ${p.name} [${p.type}] = ${p.value}${def}`);
-          }
-        }
-      };
-
-      if (component) {
-        lines.push(`Actor: ${data.label} — Component: ${data.component} (${data.class})`);
-        lines.push(`Properties (${data.count || 0}):`);
-        formatProps(data.properties || []);
-        lines.push(``);
-        lines.push(`Tip: set_actor_property(label="${label}", property="${component}.PropertyName", value="...")`);
-      } else {
-        lines.push(`Actor: ${data.label} (${data.class})`);
-        lines.push(`Properties (${data.count || 0}):`);
-        formatProps(data.properties || []);
-        if (data.components && data.components.length > 0) {
-          lines.push(``);
-          lines.push(`Components (${data.components.length}):`);
-          for (const c of data.components) {
-            lines.push(`  ${c.name} (${c.class})`);
-          }
-          lines.push(``);
-          lines.push(`Tip: get_actor_properties(label="${label}", component="<name>") to inspect component properties`);
-          lines.push(`     set_actor_property(label="${label}", property="ComponentName.PropName", value="...") to set them`);
-        }
+      try {
+        const data = await ueGet("/api/actor-properties", params);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [`set_actor_property(label="${label}", property="...", value="...") to change a property`],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -180,32 +114,25 @@ export function registerLevelTools(server: McpServer): void {
     },
     async ({ label, location, rotation, scale }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { label };
       if (location) body.location = location;
       if (rotation) body.rotation = rotation;
       if (scale)    body.scale    = scale;
 
-      const data = await uePost("/api/set-actor-transform", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const loc = data.location;
-      const rot = data.rotation;
-      const scl = data.scale;
-
-      const lines: string[] = [];
-      lines.push(`Transform updated: ${data.label}`);
-      if (loc) lines.push(`  Location: (${loc.x?.toFixed(2)}, ${loc.y?.toFixed(2)}, ${loc.z?.toFixed(2)}) cm`);
-      if (rot) lines.push(`  Rotation: pitch=${rot.pitch?.toFixed(2)} yaw=${rot.yaw?.toFixed(2)} roll=${rot.roll?.toFixed(2)}`);
-      if (scl) lines.push(`  Scale:    (${scl.x?.toFixed(3)}, ${scl.y?.toFixed(3)}, ${scl.z?.toFixed(3)})`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_actors(nameFilter="${label}") — verify the new position`);
-      lines.push(`  get_actor_properties(label="${label}") — inspect other properties`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-actor-transform", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `list_actors(nameFilter="${label}") — verify the new position`,
+            `get_actor_properties(label="${label}") — inspect other properties`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -219,23 +146,17 @@ export function registerLevelTools(server: McpServer): void {
     },
     async ({ label, property, value }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-actor-property", { label, property, value });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Property set successfully.`);
-      lines.push(`Actor:    ${data.label}`);
-      if (data.component) lines.push(`Component: ${data.component}`);
-      lines.push(`Property: ${data.property}`);
-      lines.push(`Value:    ${data.value}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  get_actor_properties(label="${label}") — verify all properties`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-actor-property", { label, property, value });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [`get_actor_properties(label="${label}") — verify all properties`],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -259,7 +180,7 @@ export function registerLevelTools(server: McpServer): void {
     },
     async ({ class: actorClass, label, location, rotation, folder }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { class: actorClass };
       if (label)    body.label    = label;
@@ -267,24 +188,19 @@ export function registerLevelTools(server: McpServer): void {
       if (rotation) body.rotation = rotation;
       if (folder)   body.folder   = folder;
 
-      const data = await uePost("/api/spawn-actor", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const loc = data.location;
-
-      const lines: string[] = [];
-      lines.push(`Actor spawned successfully.`);
-      lines.push(`Label: ${data.label}`);
-      lines.push(`Class: ${data.class}`);
-      if (loc) lines.push(`Location: (${loc.x?.toFixed(1)}, ${loc.y?.toFixed(1)}, ${loc.z?.toFixed(1)}) cm`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  set_actor_property(label="${data.label}", ...) — configure the actor`);
-      lines.push(`  set_actor_transform(label="${data.label}", ...) — reposition the actor`);
-      lines.push(`  delete_actor(label="${data.label}") — remove it if no longer needed`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/spawn-actor", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "set_actor_property(...) — configure the actor",
+            "set_actor_transform(...) — reposition the actor",
+            "delete_actor(...) — remove it if no longer needed",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -296,22 +212,17 @@ export function registerLevelTools(server: McpServer): void {
     },
     async ({ label }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/delete-actor", { label });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Actor deleted successfully.`);
-      lines.push(`Label: ${data.label}`);
-      lines.push(`Class: ${data.class}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_actors() — verify the actor was removed`);
-      lines.push(`  (Ctrl+Z in the editor to undo)`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/delete-actor", { label });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["list_actors() — verify the actor was removed"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerComponentTools(server: McpServer): void {
   server.tool(
@@ -11,23 +12,14 @@ export function registerComponentTools(server: McpServer): void {
     },
     async ({ blueprint }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/list-components", { blueprint });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Components (${data.count || 0}):`);
-
-      for (const c of data.components || []) {
-        const parent = c.parentComponent ? ` (parent: ${c.parentComponent})` : "";
-        const root = c.isSceneRoot ? " [Root]" : "";
-        const children = c.childCount > 0 ? ` [${c.childCount} children]` : "";
-        lines.push(`  ${c.name}: ${c.componentClass}${parent}${root}${children}`);
+      try {
+        const data = await uePost("/api/list-components", { blueprint });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -42,28 +34,23 @@ export function registerComponentTools(server: McpServer): void {
     },
     async ({ blueprint, componentClass, name, parentComponent }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, componentClass, name };
       if (parentComponent) body.parentComponent = parentComponent;
 
-      const data = await uePost("/api/add-component", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Component added successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Name: ${data.name}`);
-      lines.push(`Class: ${data.componentClass}`);
-      if (data.parentComponent) lines.push(`Parent: ${data.parentComponent}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_components(blueprint="${blueprint}") — verify the component hierarchy`);
-      lines.push(`  set_blueprint_default(blueprint="${blueprint}", ...) — configure component properties`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/add-component", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `list_components(blueprint="${blueprint}") to verify the component hierarchy`,
+            `set_blueprint_default(blueprint="${blueprint}", ...) to configure component properties`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -76,28 +63,17 @@ export function registerComponentTools(server: McpServer): void {
     },
     async ({ blueprint, name }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/remove-component", { blueprint, name });
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.existingComponents?.length) {
-          msg += `\nExisting components: ${data.existingComponents.join(", ")}`;
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/remove-component", { blueprint, name });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [`list_components(blueprint="${blueprint}") to verify the component was removed`],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-      lines.push(`Component removed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Removed: ${data.name}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_components(blueprint="${blueprint}") — verify the component was removed`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

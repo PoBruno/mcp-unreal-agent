@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
-import { TYPE_NAME_DOCS, formatUpdatedState } from "../helpers.js";
+import { TYPE_NAME_DOCS } from "../helpers.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerMutationTools(server: McpServer): void {
   server.tool(
@@ -15,50 +16,23 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, oldClass, newClass, dryRun }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, oldClass, newClass };
       if (dryRun) body.dryRun = true;
 
-      const data = await uePost("/api/replace-function-calls", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (dryRun) lines.push(`[DRY RUN - no changes saved]`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Replaced: ${data.replacedCount} function call node(s)`);
-
-      if (data.saved !== undefined) {
-        lines.push(`Saved: ${data.saved}`);
+      try {
+        const data = await uePost("/api/replace-function-calls", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: dryRun ? undefined : [
+            "verify with get_blueprint_graph to inspect the updated graphs",
+            "run refresh_all_nodes to propagate pin type changes",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.message) {
-        lines.push(data.message);
-      }
-
-      if (data.brokenConnectionCount > 0) {
-        lines.push(`\nBroken connections (${data.brokenConnectionCount}):`);
-        for (const bc of data.brokenConnections) {
-          if (bc.type === "functionNotFound") {
-            lines.push(`  WARNING: Function '${bc.functionName}' not found in new class (node ${bc.nodeId})`);
-          } else if (bc.type === "connectionLost") {
-            lines.push(`  BROKEN: ${bc.functionName} pin '${bc.pinName}' was connected to node ${bc.wasConnectedToNode}.${bc.wasConnectedToPin}`);
-          }
-        }
-        lines.push("\nThese connections must be fixed manually in the editor.");
-      }
-
-      // Updated state (#11)
-      lines.push(...formatUpdatedState(data));
-
-      // Tool chaining hints (#12)
-      if (!dryRun) {
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Verify with get_blueprint_graph to inspect the updated graphs`);
-        lines.push(`  2. Run refresh_all_nodes to propagate pin type changes`);
-      }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -75,86 +49,22 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ assetPath, force, batch }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = batch
         ? { batch }
         : { assetPath };
       if (force && !batch) body.force = true;
 
-      const data = await uePost("/api/delete-asset", body);
-
-      if (data.error) {
-        let msg = `Error: ${data.error}`;
-        if (data.referencers) {
-          // Classify live vs stale references (#16)
-          const liveRefs = data.liveReferencers || [];
-          const staleRefs = data.staleReferencers || [];
-          if (liveRefs.length > 0 || staleRefs.length > 0) {
-            if (liveRefs.length > 0) {
-              msg += `\n\nLive references (${liveRefs.length}) \u2014 these assets actively use this asset:`;
-              msg += liveRefs.map((r: string) => `\n  ${r}`).join("");
-            }
-            if (staleRefs.length > 0) {
-              msg += `\n\nStale references (${staleRefs.length}) \u2014 these may be outdated/cached:`;
-              msg += staleRefs.map((r: string) => `\n  ${r}`).join("");
-            }
-            msg += `\n\nNext steps:`;
-            msg += `\n  - Fix live references by updating the referencing Blueprints`;
-            msg += `\n  - Use force=true to delete despite stale references`;
-            msg += `\n  - Or run find_asset_references to inspect each one`;
-          } else {
-            msg += `\n\nStill referenced by (${data.referencerCount}):\n`;
-            msg += data.referencers.map((r: string) => `  ${r}`).join("\n");
-            msg += `\n\nNext steps:`;
-            msg += `\n  - Update or remove references in the listed assets first`;
-            msg += `\n  - Or use force=true to force-delete (references become stale)`;
-          }
-        }
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/delete-asset", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["verify no orphaned references remain with find_asset_references"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.results) {
-        // Batch response
-        const lines: string[] = [`Batch delete: ${data.results.length} operation(s)`];
-        for (const r of data.results) {
-          if (r.error) {
-            lines.push(`  FAILED ${r.assetPath}: ${r.error}`);
-          } else {
-            lines.push(`  DELETED ${r.assetPath}`);
-          }
-        }
-        // Tool chaining hints (#12)
-        lines.push(`\nNext steps:`);
-        lines.push(`  1. Verify no orphaned references remain with find_asset_references`);
-        return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-      }
-
-      const lines: string[] = [];
-      lines.push(`Asset deleted successfully.`);
-      lines.push(`Path: ${data.assetPath}`);
-      lines.push(`File: ${data.filename}`);
-
-      // Show warning-based reference info when force was used (#1)
-      if (data.warnings?.length) {
-        lines.push(`\nWarnings:`);
-        for (const w of data.warnings) {
-          lines.push(`  \u26A0 ${w}`);
-        }
-      }
-      if (data.forcedReferencers?.length) {
-        lines.push(`\nForce-deleted despite references from:`);
-        for (const ref of data.forcedReferencers) {
-          lines.push(`  ${ref}`);
-        }
-        lines.push(`These references are now stale and should be cleaned up.`);
-      }
-
-      // Tool chaining hints (#12)
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Verify no orphaned references remain with find_asset_references`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -177,49 +87,18 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, sourceNodeId, sourcePinName, targetNodeId, targetPinName, batch }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = batch
         ? { batch }
         : { blueprint, sourceNodeId, sourcePinName, targetNodeId, targetPinName };
 
-      const data = await uePost("/api/connect-pins", body);
-
-      if (data.error && !data.success) {
-        let msg = `Error: ${data.error}`;
-        if (data.availablePins) {
-          msg += `\nAvailable pins: ${data.availablePins.join(", ")}`;
-        }
-        if (data.sourcePinType) msg += `\nSource pin type: ${data.sourcePinType}${data.sourcePinSubtype ? ` (${data.sourcePinSubtype})` : ""}`;
-        if (data.targetPinType) msg += `\nTarget pin type: ${data.targetPinType}${data.targetPinSubtype ? ` (${data.targetPinSubtype})` : ""}`;
-        return { content: [{ type: "text" as const, text: msg }] };
+      try {
+        const data = await uePost("/api/connect-pins", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      const lines: string[] = [];
-
-      if (data.results) {
-        // Batch response
-        lines.push(`Batch connect: ${data.results.length} operation(s)`);
-        for (const r of data.results) {
-          if (r.error) {
-            lines.push(`  FAILED: ${r.error}`);
-          } else {
-            lines.push(`  OK: ${r.sourcePinName} \u2192 ${r.targetPinName}`);
-          }
-        }
-        if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      } else {
-        lines.push(`Connection ${data.success ? "succeeded" : "failed"}.`);
-        lines.push(`Blueprint: ${data.blueprint}`);
-        lines.push(`Source pin type: ${data.sourcePinType}${data.sourcePinSubtype ? ` (${data.sourcePinSubtype})` : ""}`);
-        lines.push(`Target pin type: ${data.targetPinType}${data.targetPinSubtype ? ` (${data.targetPinSubtype})` : ""}`);
-        if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      }
-
-      // Updated state (#11)
-      lines.push(...formatUpdatedState(data));
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -235,20 +114,18 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId, pinName, targetNodeId, targetPinName }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, nodeId, pinName };
       if (targetNodeId) body.targetNodeId = targetNodeId;
       if (targetPinName) body.targetPinName = targetPinName;
 
-      const data = await uePost("/api/disconnect-pin", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Disconnected ${data.disconnectedCount} link(s).`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Saved: ${data.saved}`);
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/disconnect-pin", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -262,36 +139,17 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId, newType }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/change-struct-node-type", { blueprint, nodeId, newType });
-
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Struct node type changed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Node: ${data.nodeId} (${data.nodeClass})`);
-      lines.push(`New type: ${data.newStructType}`);
-      lines.push(`Reconnected: ${data.reconnected}, Failed: ${data.failed}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      if (data.reconnectDetails?.length) {
-        lines.push(`\nReconnection details:`);
-        for (const d of data.reconnectDetails) {
-          const status = d.connected ? "OK" : "FAILED";
-          lines.push(`  ${d.property}: ${status}${d.reason ? ` (${d.reason})` : ""}`);
-        }
+      try {
+        const data = await uePost("/api/change-struct-node-type", { blueprint, nodeId, newType });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["run refresh_all_nodes to propagate type changes throughout the Blueprint"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      // Updated state (#11)
-      lines.push(...formatUpdatedState(data));
-
-      // Tool chaining hints (#12)
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Run refresh_all_nodes to propagate type changes throughout the Blueprint`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -303,18 +161,14 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/refresh-all-nodes", { blueprint });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Refresh ${data.success ? "succeeded" : "completed with issues"}.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Graphs: ${data.graphCount}, Nodes: ${data.nodeCount}`);
-      lines.push(`Saved: ${data.saved}`);
-      if (data.warning) lines.push(`Warning: ${data.warning}`);
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/refresh-all-nodes", { blueprint });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -327,21 +181,14 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/delete-node", { blueprint, nodeId });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Node removed successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
-      if (data.nodeClass) lines.push(`Node class: ${data.nodeClass}`);
-      if (data.nodeTitle) lines.push(`Node title: ${data.nodeTitle}`);
-      if (data.disconnectedPins !== undefined) lines.push(`Disconnected pins: ${data.disconnectedPins}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/delete-node", { blueprint, nodeId });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -373,7 +220,7 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, nodeType, typeName, functionName, className, variableName, castTarget, eventName, actorClass, comment, width, height, posX, posY }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, graph, nodeType };
       if (typeName) body.typeName = typeName;
@@ -389,38 +236,12 @@ export function registerMutationTools(server: McpServer): void {
       if (posX !== undefined) body.posX = posX;
       if (posY !== undefined) body.posY = posY;
 
-      const data = await uePost("/api/add-node", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      if (data.alreadyExists) {
-        lines.push(`Node already exists (returning existing).`);
-      } else {
-        lines.push(`Node added successfully.`);
+      try {
+        const data = await uePost("/api/add-node", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Graph: ${data.graph}`);
-      if (data.nodeId) lines.push(`Node ID: ${data.nodeId}`);
-      if (data.nodeClass) lines.push(`Node class: ${data.nodeClass}`);
-      if (data.nodeTitle) lines.push(`Node title: ${data.nodeTitle}`);
-
-      if (data.node?.pins?.length) {
-        lines.push(`\nPins:`);
-        for (const pin of data.node.pins) {
-          const dir = pin.direction === "Output" ? "\u2192" : "\u2190";
-          lines.push(`  ${dir} ${pin.name}: ${pin.type}${pin.subtype ? ` (${pin.subtype})` : ""}`);
-        }
-      } else if (data.pins?.length) {
-        lines.push(`\nPins:`);
-        for (const pin of data.pins) {
-          const dir = pin.direction === "Output" ? "\u2192" : "\u2190";
-          lines.push(`  ${dir} ${pin.name}: ${pin.type}${pin.subtype ? ` (${pin.subtype})` : ""}`);
-        }
-      }
-
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -433,19 +254,14 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ assetPath, newPath }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/rename-asset", { assetPath, newPath });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Asset renamed/moved successfully.`);
-      lines.push(`From: ${data.oldPath || assetPath}`);
-      lines.push(`To: ${data.newPath || newPath}`);
-      if (data.referencesUpdated !== undefined) lines.push(`References updated: ${data.referencesUpdated}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/rename-asset", { assetPath, newPath });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -466,39 +282,18 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId, pinName, value, batch }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = batch
         ? { batch }
         : { blueprint, nodeId, pinName, value };
 
-      const data = await uePost("/api/set-pin-default", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-
-      if (data.results) {
-        // Batch response
-        lines.push(`Batch set_pin_default: ${data.successCount}/${data.totalCount} succeeded.`);
-        for (const r of data.results) {
-          if (r.error) {
-            lines.push(`  FAILED ${r.nodeId || "?"}.${r.pinName || "?"}: ${r.error}`);
-          } else {
-            lines.push(`  OK ${r.nodeId}.${r.pinName}: ${r.oldValue || "(empty)"} -> ${r.newValue}`);
-          }
-        }
-        if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      } else {
-        lines.push(`Pin default set successfully.`);
-        lines.push(`Blueprint: ${data.blueprint}`);
-        lines.push(`Node: ${data.nodeId}`);
-        lines.push(`Pin: ${data.pinName}`);
-        lines.push(`Old value: ${data.oldValue || "(empty)"}`);
-        lines.push(`New value: ${data.newValue}`);
-        if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
+      try {
+        const data = await uePost("/api/set-pin-default", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -518,7 +313,7 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId, x, y, nodes }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint };
       if (nodes) {
@@ -529,31 +324,12 @@ export function registerMutationTools(server: McpServer): void {
         if (y !== undefined) body.y = y;
       }
 
-      const data = await uePost("/api/move-node", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-
-      if (data.results) {
-        // Batch response
-        lines.push(`Batch move: ${data.movedCount}/${data.totalRequested} node(s) repositioned.`);
-        lines.push(`Blueprint: ${data.blueprint}`);
-        for (const r of data.results) {
-          if (r.error) {
-            lines.push(`  FAILED ${r.nodeId}: ${r.error}`);
-          } else {
-            lines.push(`  OK ${r.nodeId}: (${r.oldX},${r.oldY}) -> (${r.newX},${r.newY})`);
-          }
-        }
-      } else {
-        lines.push(`Node repositioned successfully.`);
-        lines.push(`Blueprint: ${data.blueprint}`);
-        lines.push(`Node: ${data.nodeId}`);
-        lines.push(`Position: (${data.oldX},${data.oldY}) -> (${data.newX},${data.newY})`);
+      try {
+        const data = await uePost("/api/move-node", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -567,20 +343,14 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, property, value }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-blueprint-default", { blueprint, property, value });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Default property set successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Property: ${data.property} (${data.propertyType})`);
-      lines.push(`Old value: ${data.oldValue || "(empty)"}`);
-      lines.push(`New value: ${data.newValue}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-blueprint-default", { blueprint, property, value });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -596,42 +366,21 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, graph, nodeIds, offsetX, offsetY }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, graph, nodeIds };
       if (offsetX !== undefined) body.offsetX = offsetX;
       if (offsetY !== undefined) body.offsetY = offsetY;
 
-      const data = await uePost("/api/duplicate-nodes", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Duplicated ${data.duplicatedCount} node(s).`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Graph: ${data.graph}`);
-
-      if (data.nodes?.length) {
-        lines.push(``);
-        for (const n of data.nodes) {
-          if (n.error) {
-            lines.push(`  FAILED ${n.sourceNodeId}: ${n.error}`);
-          } else {
-            lines.push(`  ${n.sourceNodeId} -> ${n.newNodeId} at (${n.posX},${n.posY})`);
-          }
-        }
+      try {
+        const data = await uePost("/api/duplicate-nodes", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["connect_pins to wire the duplicated nodes to other nodes"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.notFound?.length) {
-        lines.push(`\nNot found: ${data.notFound.join(", ")}`);
-      }
-
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  connect_pins — wire the duplicated nodes to other nodes`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -644,18 +393,14 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/get-node-comment", { blueprint, nodeId });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Node: ${data.nodeId}`);
-      lines.push(`Comment: ${data.comment || "(empty)"}`);
-      lines.push(`Comment bubble visible: ${data.commentBubbleVisible}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/get-node-comment", { blueprint, nodeId });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -669,20 +414,14 @@ export function registerMutationTools(server: McpServer): void {
     },
     async ({ blueprint, nodeId, comment }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-node-comment", { blueprint, nodeId, comment });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Node comment set successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Node: ${data.nodeId}`);
-      lines.push(`Old comment: ${data.oldComment || "(empty)"}`);
-      lines.push(`New comment: ${data.newComment || "(empty)"}`);
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/set-node-comment", { blueprint, nodeId, comment });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

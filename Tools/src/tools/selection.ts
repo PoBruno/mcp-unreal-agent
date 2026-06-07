@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerSelectionTools(server: McpServer): void {
   server.tool(
@@ -9,27 +10,19 @@ export function registerSelectionTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
-
-      const data = await uePost("/api/get-editor-selection", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Selected actors: ${data.count}`);
-
-      if (data.selectedActors && data.selectedActors.length > 0) {
-        for (const actor of data.selectedActors) {
-          lines.push(`  - ${actor.label} (${actor.class}) at (${actor.location.x}, ${actor.location.y}, ${actor.location.z})`);
-        }
-      } else {
-        lines.push("No actors selected.");
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
+      try {
+        const data = await uePost("/api/get-editor-selection", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use set_editor_selection to change the selection",
+            "use clear_selection to deselect all",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use set_editor_selection to change the selection`);
-      lines.push(`  2. Use clear_selection to deselect all`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -41,28 +34,19 @@ export function registerSelectionTools(server: McpServer): void {
     },
     async ({ actorLabels }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
-
-      const data = await uePost("/api/set-editor-selection", { actorLabels });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Selected ${data.selectedCount} actor(s)`,
-      ];
-
-      if (data.selected && data.selected.length > 0) {
-        lines.push(`Selected: ${data.selected.join(", ")}`);
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
+      try {
+        const data = await uePost("/api/set-editor-selection", { actorLabels });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use get_editor_selection to verify the selection",
+            "use focus_actor to focus on a selected actor",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      if (data.notFoundCount > 0) {
-        lines.push(`Not found (${data.notFoundCount}): ${data.notFound.join(", ")}`);
-      }
-
-      lines.push(`\nNext steps:`);
-      lines.push(`  1. Use get_editor_selection to verify the selection`);
-      lines.push(`  2. Use focus_actor to focus on a selected actor`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -72,19 +56,16 @@ export function registerSelectionTools(server: McpServer): void {
     {},
     async () => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
-
-      const data = await uePost("/api/clear-selection", {});
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Selection cleared`,
-        `Previously selected: ${data.previousSelectionCount} actor(s)`,
-        `\nNext steps:`,
-        `  1. Use set_editor_selection to select new actors`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
+      try {
+        const data = await uePost("/api/clear-selection", {});
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: ["use set_editor_selection to select new actors"],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

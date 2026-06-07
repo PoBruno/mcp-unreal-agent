@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerViewModeTools(server: McpServer): void {
   server.tool(
@@ -12,12 +13,14 @@ export function registerViewModeTools(server: McpServer): void {
     },
     async ({ mode }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-view-mode", { mode });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `View mode set to: ${data.mode}` }] };
+      try {
+        const data = await uePost("/api/set-view-mode", { mode });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -30,15 +33,17 @@ export function registerViewModeTools(server: McpServer): void {
     },
     async ({ flag, enabled }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { flag };
       if (enabled !== undefined) body.enabled = enabled;
 
-      const data = await uePost("/api/set-show-flags", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `Show flag '${data.flag}' ${data.enabled ? "enabled" : "disabled"}` }] };
+      try {
+        const data = await uePost("/api/set-show-flags", body);
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -51,12 +56,14 @@ export function registerViewModeTools(server: McpServer): void {
     },
     async ({ type }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-viewport-type", { type });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `Viewport type set to: ${data.type}` }] };
+      try {
+        const data = await uePost("/api/set-viewport-type", { type });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -68,12 +75,14 @@ export function registerViewModeTools(server: McpServer): void {
     },
     async ({ enabled }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-realtime-rendering", { enabled });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `Realtime rendering: ${data.realtime ? "enabled" : "disabled"}` }] };
+      try {
+        const data = await uePost("/api/set-realtime-rendering", { enabled });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -85,12 +94,14 @@ export function registerViewModeTools(server: McpServer): void {
     },
     async ({ enabled }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/set-game-view", { enabled });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      return { content: [{ type: "text" as const, text: `Game view: ${data.gameView ? "enabled" : "disabled"}` }] };
+      try {
+        const data = await uePost("/api/set-game-view", { enabled });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 }

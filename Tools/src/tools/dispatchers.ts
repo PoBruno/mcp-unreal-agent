@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
 import { TYPE_NAME_DOCS } from "../helpers.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerDispatcherTools(server: McpServer): void {
   server.tool(
@@ -17,34 +18,24 @@ export function registerDispatcherTools(server: McpServer): void {
     },
     async ({ blueprint, dispatcherName, parameters }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
       const body: Record<string, any> = { blueprint, dispatcherName };
       if (parameters?.length) body.parameters = parameters;
 
-      const data = await uePost("/api/add-event-dispatcher", body);
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Event dispatcher created successfully.`);
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Dispatcher: ${data.dispatcherName}`);
-      if (data.parameters?.length) {
-        lines.push(`Parameters:`);
-        for (const p of data.parameters) {
-          lines.push(`  ${p.name}: ${p.type}`);
-        }
-      } else {
-        lines.push(`Parameters: (none)`);
+      try {
+        const data = await uePost("/api/add-event-dispatcher", body);
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            `list_event_dispatchers(blueprint="${blueprint}") to verify the dispatcher was created`,
+            `add_function_parameter(blueprint="${blueprint}", functionName="${dispatcherName}", ...) to add more parameters`,
+            `add_node(blueprint="${blueprint}", graph="EventGraph", nodeType="CallFunction", functionName="<dispatcherName>_Event") to bind to it`,
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-      if (data.saved !== undefined) lines.push(`Saved: ${data.saved}`);
-      lines.push(``);
-      lines.push(`Next steps:`);
-      lines.push(`  list_event_dispatchers(blueprint="${blueprint}") — verify the dispatcher was created`);
-      lines.push(`  add_function_parameter(blueprint="${blueprint}", functionName="${dispatcherName}", ...) — add more parameters`);
-      lines.push(`  add_node(blueprint="${blueprint}", graph="EventGraph", nodeType="CallFunction", functionName="<dispatcherName>_Event") — bind to it`);
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 
@@ -56,28 +47,14 @@ export function registerDispatcherTools(server: McpServer): void {
     },
     async ({ blueprint }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/list-event-dispatchers", { blueprint });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines: string[] = [];
-      lines.push(`Blueprint: ${data.blueprint}`);
-      lines.push(`Event dispatchers: ${data.count}`);
-
-      if (data.dispatchers?.length) {
-        lines.push(``);
-        for (const d of data.dispatchers) {
-          if (d.parameters?.length) {
-            const paramStr = d.parameters.map((p: any) => `${p.name}: ${p.type}`).join(", ");
-            lines.push(`  ${d.name}(${paramStr})`);
-          } else {
-            lines.push(`  ${d.name}()`);
-          }
-        }
+      try {
+        const data = await uePost("/api/list-event-dispatchers", { blueprint });
+        return toMcp(wrapRaw(data, { refs: autoRefs(data) }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }

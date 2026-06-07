@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ensureUE, uePost } from "../ue-bridge.js";
+import { toMcp, wrapRaw, autoRefs, fail } from "../types.js";
 
 export function registerContentBrowserTools(server: McpServer): void {
   server.tool(
@@ -11,19 +12,20 @@ export function registerContentBrowserTools(server: McpServer): void {
     },
     async ({ path }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/navigate-content-browser", { path });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `Content Browser navigated to: ${data.navigatedTo}`,
-        `\nNext steps:`,
-        `  1. Use list_blueprints to see assets in this folder`,
-        `  2. Use open_asset_editor to open a specific asset`,
-      ];
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      try {
+        const data = await uePost("/api/navigate-content-browser", { path });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use list_blueprints to see assets in this folder",
+            "use open_asset_editor to open a specific asset",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
+      }
     }
   );
 
@@ -35,28 +37,20 @@ export function registerContentBrowserTools(server: McpServer): void {
     },
     async ({ assetPath }) => {
       const err = await ensureUE();
-      if (err) return { content: [{ type: "text" as const, text: err }] };
+      if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
-      const data = await uePost("/api/open-asset-editor", { assetPath });
-      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
-
-      const lines = [
-        `${data.success ? "Opened" : "Failed to open"} editor for '${data.assetName}'`,
-        `  Path: ${data.assetPath}`,
-        `  Class: ${data.assetClass}`,
-      ];
-
-      if (data.warning) {
-        lines.push(`  Warning: ${data.warning}`);
+      try {
+        const data = await uePost("/api/open-asset-editor", { assetPath });
+        return toMcp(wrapRaw(data, {
+          refs: autoRefs(data),
+          nextSteps: [
+            "use get_blueprint to inspect the asset's contents",
+            "use navigate_content_browser to browse related assets",
+          ],
+        }));
+      } catch (e) {
+        return toMcp(fail("UE_HTTP_FAILED", String(e)));
       }
-
-      lines.push(
-        `\nNext steps:`,
-        `  1. Use get_blueprint to inspect the asset's contents`,
-        `  2. Use navigate_content_browser to browse related assets`,
-      );
-
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }
