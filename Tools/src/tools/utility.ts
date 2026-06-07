@@ -120,6 +120,22 @@ export function registerUtilityTools(server: McpServer): void {
   );
 
   server.tool(
+    "set_presence",
+    "Toggle live-view presence. When enabled (default), editing a Blueprint auto-opens its editor as a docked tab in the main window so the user can watch the agent work. Disable to avoid opening editors during bulk operations.",
+    {
+      enabled: z.boolean().describe("true to auto-reveal edited Blueprints, false to disable"),
+    },
+    async ({ enabled }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/set-presence", { enabled });
+      if (data.error) return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      return { content: [{ type: "text" as const, text: `Presence auto-reveal: ${data.autoReveal ? "ON" : "OFF"}` }] };
+    }
+  );
+
+  server.tool(
     "shutdown_server",
     "Shut down the UE5 Blueprint server to free memory (~2-4 GB). The server will auto-restart on the next blueprint tool call. Use this when done with blueprint analysis. Cannot shut down the editor — only the standalone commandlet.",
     {},

@@ -351,6 +351,14 @@ private:
 	FString HandleSetGameView(const FString& Body);
 	FString HandleTakeScreenshot(const FString& Body);
 	FString HandleTakeHighResScreenshot(const FString& Body);
+	FString HandleCaptureScene(const FString& Body);
+
+	// ----- Presence / live-view (auto-reveal what the agent is editing) -----
+	FString HandleSetPresence(const FString& Body);
+	// When true, mutating a Blueprint opens its editor docked in the main window.
+	bool bAutoRevealAssets = true;
+	// Open the given Blueprint's editor as a docked tab (no-op unless bAutoRevealAssets).
+	void RevealBlueprintEditor(class UBlueprint* BP);
 
 	// ----- Output log / undo-redo / editor utils -----
 	FString HandleGetOutputLog(const FString& Body);

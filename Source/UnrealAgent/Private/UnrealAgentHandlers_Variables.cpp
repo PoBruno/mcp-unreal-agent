@@ -44,6 +44,7 @@ FString FUnrealAgentServer::HandleChangeVariableType(const FString& Body)
 	{
 		return MakeErrorJson(LoadError);
 	}
+	RevealBlueprintEditor(BP); // live-view: open the BP as a docked tab when presence is on
 
 	// Verify variable exists
 	bool bVarFound = false;

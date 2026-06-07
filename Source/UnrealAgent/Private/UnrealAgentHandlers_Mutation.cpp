@@ -75,6 +75,7 @@ FString FUnrealAgentServer::HandleReplaceFunctionCalls(const FString& Body)
 	{
 		return MakeErrorJson(LoadError);
 	}
+	RevealBlueprintEditor(BP); // live-view: open the BP as a docked tab when presence is on
 
 	// Find the new class — try several search strategies
 	UClass* NewClass = nullptr;

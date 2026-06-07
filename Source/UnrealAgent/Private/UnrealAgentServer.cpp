@@ -908,6 +908,9 @@ bool FUnrealAgentServer::Start(int32 InPort, bool bEditorMode)
 	Router->BindRoute(FHttpPath(TEXT("/api/pie-query-actors")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("pieQueryActors")));
 	// Python (R-05)
 	Router->BindRoute(FHttpPath(TEXT("/api/python-exec")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("pythonExec")));
+	// Presence / offscreen capture
+	Router->BindRoute(FHttpPath(TEXT("/api/capture-scene")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("captureScene")));
+	Router->BindRoute(FHttpPath(TEXT("/api/set-presence")), EHttpServerRequestVerbs::VERB_POST, QueuedHandler(TEXT("setPresence")));
 
 	// Register TMap dispatch handlers
 	RegisterHandlers();
@@ -1266,6 +1269,8 @@ void FUnrealAgentServer::RegisterHandlers()
 	HandlerMap.Add(TEXT("pieTeleportPlayer"),  [this](const TMap<FString, FString>&, const FString& B) { return HandlePIETeleportPlayer(B); });
 	HandlerMap.Add(TEXT("pieQueryActors"),     [this](const TMap<FString, FString>&, const FString& B) { return HandlePIEQueryActors(B); });
 	HandlerMap.Add(TEXT("pythonExec"),         [this](const TMap<FString, FString>&, const FString& B) { return HandlePythonExec(B); });
+	HandlerMap.Add(TEXT("captureScene"),       [this](const TMap<FString, FString>&, const FString& B) { return HandleCaptureScene(B); });
+	HandlerMap.Add(TEXT("setPresence"),        [this](const TMap<FString, FString>&, const FString& B) { return HandleSetPresence(B); });
 }
 
 // ============================================================
