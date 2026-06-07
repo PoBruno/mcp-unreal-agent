@@ -162,11 +162,11 @@ export function registerMutationTools(server: McpServer): void {
     "connect_pins",
     "Wire two pins together in a Blueprint graph. Uses type-validated connection (TryCreateConnection) so incompatible types will fail with details. Get node IDs and pin names from get_blueprint_graph first.",
     {
-      blueprint: z.string().describe("Blueprint name or package path (e.g. 'BP_PatientJson')"),
-      sourceNodeId: z.string().describe("GUID of the source node (from get_blueprint_graph node 'id' field)"),
-      sourcePinName: z.string().describe("Name of the output pin on the source node"),
-      targetNodeId: z.string().describe("GUID of the target node"),
-      targetPinName: z.string().describe("Name of the input pin on the target node"),
+      blueprint: z.string().optional().describe("Blueprint name or package path (e.g. 'BP_PatientJson'). Required in single mode; omit when using batch."),
+      sourceNodeId: z.string().optional().describe("GUID of the source node (from get_blueprint_graph node 'id' field). Required in single mode."),
+      sourcePinName: z.string().optional().describe("Name of the output pin on the source node. Required in single mode."),
+      targetNodeId: z.string().optional().describe("GUID of the target node. Required in single mode."),
+      targetPinName: z.string().optional().describe("Name of the input pin on the target node. Required in single mode."),
       batch: z.array(z.object({
         blueprint: z.string(),
         sourceNodeId: z.string(),

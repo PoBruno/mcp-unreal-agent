@@ -23,6 +23,25 @@ import { registerAnimationTools } from "./tools/animation-mutation.js";
 import { registerGroomTools } from "./tools/groom.js";
 import { registerScreenshotTools } from "./tools/screenshot.js";
 
+// Editor / scene / runtime tool groups (R-01: previously implemented but unregistered)
+import { registerActorQueryTools } from "./tools/actor-query.js";
+import { registerActorStateTools } from "./tools/actor-state.js";
+import { registerLevelTools } from "./tools/level.js";
+import { registerLevelActorTools } from "./tools/level-actors.js";
+import { registerSublevelTools } from "./tools/sublevels.js";
+import { registerSelectionTools } from "./tools/selection.js";
+import { registerSpatialTools } from "./tools/spatial.js";
+import { registerCameraTools } from "./tools/camera.js";
+import { registerViewModeTools } from "./tools/view-mode.js";
+import { registerPIELifecycleTools } from "./tools/pie-lifecycle.js";
+import { registerPIERuntimeTools } from "./tools/pie-runtime.js";
+import { registerCVarTools } from "./tools/cvars.js";
+import { registerContentBrowserTools } from "./tools/content-browser.js";
+import { registerEditorUtilityTools } from "./tools/editor-utils.js";
+import { registerOutputLogTools } from "./tools/output-log.js";
+import { registerUndoRedoTools } from "./tools/undo-redo.js";
+import { registerWidgetTools } from "./tools/widgets.js";
+
 // Resource registrations
 import { registerBlueprintListResource } from "./resources/blueprint-list.js";
 import { registerWorkflowRecipesResource } from "./resources/workflow-recipes.js";
@@ -52,6 +71,25 @@ registerMaterialMutationTools(server);
 registerAnimationTools(server);
 registerGroomTools(server);
 registerScreenshotTools(server);
+
+// Editor / scene / runtime tool groups (R-01)
+registerActorQueryTools(server);
+registerActorStateTools(server);
+registerLevelTools(server);
+registerLevelActorTools(server);
+registerSublevelTools(server);
+registerSelectionTools(server);
+registerSpatialTools(server);
+registerCameraTools(server);
+registerViewModeTools(server);
+registerPIELifecycleTools(server);
+registerPIERuntimeTools(server);
+registerCVarTools(server);
+registerContentBrowserTools(server);
+registerEditorUtilityTools(server);
+registerOutputLogTools(server);
+registerUndoRedoTools(server);
+registerWidgetTools(server);
 
 // Register resources
 registerBlueprintListResource(server);

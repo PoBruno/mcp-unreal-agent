@@ -903,6 +903,19 @@ FString FUnrealAgentServer::HandleConnectMaterialPins(const FString& Body)
 			break;
 	}
 
+	// R-09: allow 'Result' as a documented alias for the material output (root) node.
+	if (!TargetNode && TargetNodeId.Equals(TEXT("Result"), ESearchCase::IgnoreCase))
+	{
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (Node && Node->GetClass()->GetName().Contains(TEXT("MaterialGraphNode_Root")))
+			{
+				TargetNode = Node;
+				break;
+			}
+		}
+	}
+
 	if (!SourceNode)
 	{
 		return MakeErrorJson(FString::Printf(TEXT("Source node '%s' not found in material graph"), *SourceNodeId));

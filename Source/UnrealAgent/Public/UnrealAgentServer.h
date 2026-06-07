@@ -388,6 +388,9 @@ private:
 	FString HandleNavigateContentBrowser(const FString& Body);
 	FString HandleOpenAssetEditor(const FString& Body);
 
+	// ----- Python -----
+	FString HandlePythonExec(const FString& Body);
+
 	// ----- Serialization -----
 	TSharedRef<FJsonObject> SerializeBlueprint(UBlueprint* BP);
 	TSharedPtr<FJsonObject> SerializeGraph(UEdGraph* Graph);

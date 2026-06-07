@@ -97,6 +97,29 @@ export function registerUtilityTools(server: McpServer): void {
   );
 
   server.tool(
+    "python_exec",
+    "Run a Python statement or script inside the UE editor and return its captured output and result. Use this (not exec_command) when you need the print output or an evaluated value back. Single expressions are evaluated (value returned in 'result'); multi-line or assignments are executed. Requires editor mode + the Python Editor Script Plugin.",
+    {
+      command: z.string().describe("Python code to run (e.g. 'unreal.SystemLibrary.get_engine_version()' or a multi-line script)"),
+    },
+    async ({ command }) => {
+      const err = await ensureUE();
+      if (err) return { content: [{ type: "text" as const, text: err }] };
+
+      const data = await uePost("/api/python-exec", { command });
+      if (data.error) {
+        return { content: [{ type: "text" as const, text: `Error: ${data.error}` }] };
+      }
+
+      const lines = [`success: ${data.success}`];
+      if (data.result) lines.push(`result: ${data.result}`);
+      if (data.output) lines.push(`output:\n${data.output}`);
+      if (!data.result && !data.output) lines.push("(no output)");
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
     "shutdown_server",
     "Shut down the UE5 Blueprint server to free memory (~2-4 GB). The server will auto-restart on the next blueprint tool call. Use this when done with blueprint analysis. Cannot shut down the editor — only the standalone commandlet.",
     {},

@@ -75,9 +75,10 @@ Mark done with: `- [x] **SN-XX** Description <!-- done: YYYY-MM-DD -->`
   _(requires S1-07)_
   <!-- Requirements note built/verified on 5.7, CI Node 20. Added "Build from source" section: TS (npm install/build/test:unit) + C++ (UAT BuildPlugin command actually run, and Build.bat editor-target alternative). -->
 
-- [ ] **S1-10** First real commit on `dev` branch, push, open the long-lived `dev` → `main` PR
+- [x] **S1-10** First real commit on `dev` branch, push, open the long-lived `dev` → `main` PR <!-- done: 2026-06-07 -->
   _(requires S1-09)_
   ⚠️ Note: `dev` doesn't exist yet — `/git-commit` will create it on first push
+  <!-- Commit 0d39d27 "feat: structured ToolResult contract for health + list_blueprints" pushed to dev. PR #1 opened (PoBruno/mcp-unreal-agent dev->main). gh defaulted to the fork parent mirno-ehf/ue5-mcp — fixed with `gh repo set-default PoBruno/mcp-unreal-agent` + --repo. .mcp.json gitignored (machine-specific path). -->
 
 ---
 
