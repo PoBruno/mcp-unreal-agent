@@ -154,7 +154,7 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Library/Appli
 1. Open your `.uproject` in Unreal Editor.
 2. First open: a "Missing modules" prompt may appear → click **Yes** to compile.
 3. Wait for the editor to load fully (~30-60s on first open).
-4. In your AI agent, call the `health` tool (or ask the agent: "call the health tool on unreal-agent").
+4. In your AI agent, call the `server_status` tool (or ask the agent: "call server_status on unreal-agent").
 
 Expected response:
 ```json
@@ -177,7 +177,7 @@ If `mode == "editor"`, you're done.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Editor refuses to open, "Missing UnrealAgent module" | Plugin didn't compile | Open via VS / Rider, build the project's `<Name>Editor` target in Development Editor configuration |
-| `health` returns `UE_NOT_RUNNING` | Plugin didn't load | Check editor Output Log for `LogUnrealAgent` entries. Confirm plugin enabled under Edit → Plugins |
+| `server_status` returns `UE_NOT_RUNNING` | Plugin didn't load | Check editor Output Log for `LogUnrealAgent` entries. Confirm plugin enabled under Edit → Plugins |
 | Port 9847 in use | Another instance running | Close the conflicting editor or upstream `ue5-mcp`. Currently no runtime port override — open an issue if you need one |
 | `npm install` fails | Wrong Node version | Need Node 18+. Check with `node --version`, upgrade via [nodejs.org](https://nodejs.org) |
 | MCP server not visible to agent | Config not loaded | Restart the agent (Claude Code: close & re-open). VS Code: reload window |

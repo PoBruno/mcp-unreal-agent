@@ -346,7 +346,7 @@ Wait.
 
 ### 6.2 — Health check
 
-Once the user confirms, call the `health` MCP tool (or the equivalent ping). Expected:
+Once the user confirms, call the `server_status` MCP tool (it pings `/api/health` and starts the server if needed). Expected:
 
 ```json
 { "ok": true, "data": { "mode": "editor", "version": "0.1.0", "pluginVersion": "1.0" } }

@@ -10,8 +10,8 @@ Step-by-step recipes for the things that come up over and over when working in a
 
 1. **Locate** — if the user only named the symptom (`"the patient BP is broken"`), call `list_blueprints filter=<...>` to find the asset path.
 2. **Inspect** — `inspect target=<blueprint>` (default `depth=summary`, ~1–3K chars). You get variable counts, graph names, parent class, components. Note the `refs.blueprint` it returns; pass that into the next call.
-3. **Compile** — `compile_blueprint blueprint=<refs.blueprint>`. Returns `status` (`UpToDate` / `Error` / `Dirty`), `errorCount`, `warningCount`, and per-message `{ graph, nodeId, nodeTitle, severity, text }`.
-4. **Diagnose each error** — for each `errorCode`-flagged message, use the message's `graph` and `nodeId` to drill in:
+3. **Compile** — `compile_blueprint blueprint=<refs.blueprint>`. Returns `status` (`UpToDate` / `Error` / `Dirty`), `errorCount`, `warningCount`, and per-message `{ graph, nodeId, nodeTitle, severity, message }` (plus `errorNodeIds` in `refs`).
+4. **Diagnose each error** — for each error/warning message, use its `graph` and `nodeId` to drill in:
    - `describe_graph blueprint=... graph=...` for pseudo-code of the graph.
    - `get_node_properties blueprint=... nodeId=...` for the node's Details.
 5. **Fix** with the right mutation: `set_pin_default`, `connect_pins`, `disconnect_pin`, `change_function_parameter_type`, `replace_function_calls`, `delete_node`, `set_node_property`, etc.
