@@ -5,7 +5,7 @@ description: Step-by-step playbook for installing mcp-unreal-agent into an end u
 
 # Install skill
 
-When a user asks you to install `mcp-unreal-agent`, follow [`install/AGENT-PLAYBOOK.md`](../../../install/AGENT-PLAYBOOK.md) exactly. This skill is the higher-level "why and when" guide; the playbook is the prescriptive sequence.
+When a user asks you to install `mcp-unreal-agent`, follow [`install/AGENT-INSTALL.md`](../../../install/AGENT-INSTALL.md) exactly. That file is the adaptive installer brain (Phase 0 Confirm → 1 Detect → 2 Plan → 3 Ask → 4 Execute → 5 Inject the passive context skill → 6 Verify → 7 Uninstall/Repair). This skill is the higher-level "why and when" guide; the installer file is the prescriptive sequence.
 
 ## When this skill applies
 

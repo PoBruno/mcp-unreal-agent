@@ -32,4 +32,4 @@ Two parts:
 
 ## Install for end users
 
-If a user asks you to install this MCP into their UE5 project, follow [install/AGENT-PLAYBOOK.md](install/AGENT-PLAYBOOK.md) step by step. It is written for you to execute.
+If a user asks you to install this MCP into their UE5 project, follow [install/AGENT-INSTALL.md](install/AGENT-INSTALL.md) end to end. It is the adaptive installer brain: detect → plan → ask → execute → inject the passive context skill → verify → (optional) uninstall.

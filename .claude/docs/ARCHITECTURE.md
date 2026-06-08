@@ -266,35 +266,48 @@ Returns a future. The HTTP listener awaits it (with a timeout — default 30 s) 
 
 ## 7. Install architecture
 
-The install flow is part of the product, not a side concern. It's documented for the agent, executed by the agent.
+The install flow is part of the product, not a side concern. It's documented for the agent, executed by the agent, and **adaptive** — it analyses the user's harness, flags conflicts, and asks before destructive changes.
 
 ### 7.1 Install harness layout
 
 ```
 install/
-├── AGENT-PLAYBOOK.md          # step-by-step for the agent
-├── PROMPT-TEMPLATES.md        # copy-paste prompts for users
-└── claude-mcp-config.json     # template MCP config snippet
+├── AGENT-INSTALL.md           # adaptive installer brain (detect → plan → ask → execute → inject → verify → uninstall)
+├── INSTALL.md                 # human-only manual reference
+├── PROMPT-TEMPLATES.md        # copy-paste prompts per agent (Claude / Copilot / Cursor / Desktop / generic)
+├── claude-mcp-config.json     # template MCP config snippet
+└── context-skill/             # the passive context pack injected into the user's harness
+    ├── README.md
+    ├── SKILL.md               # Claude-format passive skill
+    ├── instructions.md        # Copilot-format *.instructions.md variant
+    ├── FLOWS.md               # canonical UE5 flows (debug, edit-any, create, observe, PIE…)
+    ├── TOOLS.md               # GENERATED catalog of every registered MCP tool
+    └── MANAGED-BLOCK.md       # the delimited block injected into the user's main instruction file
 ```
 
-### 7.2 Steps the agent performs
+`TOOLS.md` is regenerated from the actual `server.tool(…)` calls in `Tools/src/tools/*.ts` via `npm run digest` (script at `Tools/scripts/generate-tools-digest.mjs`). This guarantees the skill never drifts from the implementation.
 
-1. **Detect UE project.** Find the nearest `.uproject` (walk up from cwd).
-2. **Read engine version.** Parse `EngineAssociation` from `.uproject`. Confirm 5.4+.
-3. **Clone plugin.** `git clone https://github.com/PoBruno/mcp-unreal-agent.git <project>/Plugins/UnrealAgent`.
-4. **Build TS server.** `cd Plugins/UnrealAgent/Tools && npm install && npm run build`.
-5. **Enable plugin in `.uproject`.** Add `UnrealAgent` to `Plugins` array. Also add `PythonScriptPlugin` if missing.
-6. **Enable Python remote execution.** Edit `Config/DefaultEngine.ini`:
-   ```ini
-   [/Script/PythonScriptPlugin.PythonScriptPluginSettings]
-   bRemoteExecution=True
-   ```
-7. **Write MCP config.** Merge into `.mcp.json` (Claude) or `.vscode/mcp.json` (Copilot).
-8. **Ask user to open / restart the editor.** Plugin compiles on open.
-9. **Verify with `health` tool call.** If health returns `mode=editor`, install is done.
-10. **Report success** with one-paragraph "what you can do now" examples.
+### 7.2 The seven phases
 
-The full playbook lives at [`install/AGENT-PLAYBOOK.md`](../../install/AGENT-PLAYBOOK.md).
+1. **Confirm scope** — one-paragraph preview, get user nod.
+2. **Detect** (read-only) — `.uproject` + engine version + harness type(s) + existing MCP servers (flag conflicts) + existing instructions + prereqs (node/git/VS).
+3. **Plan** (adaptive) — primary harness, skill placement, MCP-config target, conflict resolution recommendations, build-now vs editor-compile.
+4. **Ask** (structured, `AskUserQuestion`-style) — only the decisions that aren't obvious. Conflicts and skill placement always shown.
+5. **Execute** — clone / git pull → `npm install && npm run build` → enable plugins in `.uproject` → enable `bRemoteExecution=True` → remove conflicting MCP entries (if approved) → merge `unreal-agent` into the right MCP config.
+6. **Inject** — copy `context-skill/{SKILL|instructions, FLOWS, TOOLS}.md` into the harness location; insert the delimited managed block into the primary instruction file (`CLAUDE.md` / `copilot-instructions.md` / `AGENTS.md`).
+7. **Verify** — editor restart + agent restart prompt, `health` tool call, confirmation prompt that the skill loaded, sample prompts.
+
+### 7.3 The passive context skill (headline deliverable)
+
+The skill is **always-on** and **referenced from the user's main instruction file** via a delimited managed block (`<!-- BEGIN unreal-agent --> … <!-- END unreal-agent -->`). In every interaction touching the UE5 project — analyse a bug, observe state, create/edit/adjust assets — the agent already knows the MCP tools exist and reaches for them.
+
+Content: precedence rule (user's instructions win), trigger principle, three rules of thumb (inspect-before-mutate, compile-after-mutate, `get_node_properties`→`set_node_property` for any detail), pointer to canonical flows and generated tool catalog.
+
+### 7.4 Uninstall / repair
+
+Same delimiters → clean removal. `Phase 7 — UNINSTALL / REPAIR` in `AGENT-INSTALL.md` walks the reverse path: strip the managed block, remove the skill files, remove only the `unreal-agent` MCP entry, remove the plugin, revert the `.uproject` plugin entry. Leaves the user's `Config/DefaultEngine.ini` Python setting alone (harmless without the plugin) and never touches content outside the delimiters.
+
+The full playbook lives at [`install/AGENT-INSTALL.md`](../../install/AGENT-INSTALL.md).
 
 ---
 

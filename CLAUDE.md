@@ -204,7 +204,8 @@ mcp-unreal-agent/
 │       └── tools/                  # one test file per tool group
 │
 ├── install/                        # install harness for end users
-│   ├── AGENT-PLAYBOOK.md           # agent-executable install steps
+│   ├── AGENT-INSTALL.md            # adaptive installer brain (detect → plan → ask → execute → inject → verify)
+│   ├── context-skill/              # passive context pack injected into the user's harness
 │   ├── PROMPT-TEMPLATES.md         # copy-paste prompts for Claude / Copilot
 │   └── claude-mcp-config.json      # MCP config snippet template
 │

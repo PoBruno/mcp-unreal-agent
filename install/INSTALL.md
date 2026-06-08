@@ -1,6 +1,6 @@
 # INSTALL.md
 
-Human-friendly install reference. For one-prompt install via an AI agent, see [PROMPT-TEMPLATES.md](PROMPT-TEMPLATES.md). For the agent-executable playbook, see [AGENT-PLAYBOOK.md](AGENT-PLAYBOOK.md).
+Human-friendly install reference. For one-prompt install via an AI agent, see [PROMPT-TEMPLATES.md](PROMPT-TEMPLATES.md). For the agent-executable adaptive installer, see [AGENT-INSTALL.md](AGENT-INSTALL.md).
 
 This file is the **manual install** path — for users who want to set up by hand or are debugging an automated install.
 
