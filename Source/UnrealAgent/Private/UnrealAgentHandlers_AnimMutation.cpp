@@ -33,6 +33,9 @@
 #include "Animation/AnimSequence.h"
 #include "Animation/BlendSpace.h"
 #include "K2Node_VariableGet.h"
+#include "K2Node_CallFunction.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "AnimGraphNode_TransitionResult.h"
 
 // ============================================================
 // HandleCreateAnimBlueprint — create a new Animation Blueprint
@@ -267,6 +270,93 @@ static UAnimStateTransitionNode* FindTransition(UAnimationStateMachineGraph* SMG
 	return nullptr;
 }
 
+// Wire an anim node's output pose pin to the state's Output Pose (StateResult), so the
+// state actually outputs its animation instead of "Result was visible but ignored".
+static FString WireAnimNodeToStateResult(UEdGraph* InnerGraph, UEdGraphNode* SourceNode)
+{
+	if (!InnerGraph || !SourceNode) { return TEXT("no-graph-or-source"); }
+	UEdGraphNode* ResultNode = nullptr;
+	for (UEdGraphNode* Node : InnerGraph->Nodes)
+	{
+		if (Node && (Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_Root")) ||
+			Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_StateResult"))))
+		{
+			ResultNode = Node;
+			break;
+		}
+	}
+	if (!ResultNode) { return TEXT("no-result-node"); }
+
+	UEdGraphPin* OutPin = nullptr;
+	for (UEdGraphPin* Pin : SourceNode->Pins)
+	{
+		if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct) { OutPin = Pin; break; }
+	}
+	UEdGraphPin* InPin = nullptr;
+	for (UEdGraphPin* Pin : ResultNode->Pins)
+	{
+		if (Pin && Pin->Direction == EGPD_Input && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct) { InPin = Pin; break; }
+	}
+	if (!OutPin) { return TEXT("no-out-pin"); }
+	if (!InPin) { return TEXT("no-in-pin"); }
+
+	InPin->BreakAllPinLinks();
+	const UEdGraphSchema* Schema = InnerGraph->GetSchema();
+	if (Schema) { Schema->TryCreateConnection(OutPin, InPin); }
+	return InPin->LinkedTo.Num() > 0 ? TEXT("wired") : TEXT("connect-failed");
+}
+
+// Author an always-enter rule on a transition: drop a MakeLiteralBool(true) node into the
+// transition's rule graph and wire it to the TransitionResult bool input. Clears the
+// "will never be taken, connect something to Can Enter Transition" compile warning.
+static FString SetTransitionAlwaysTrue(UAnimStateTransitionNode* TransNode)
+{
+	if (!TransNode) { return TEXT("no-transition"); }
+	UEdGraph* RuleGraph = TransNode->GetBoundGraph();
+	if (!RuleGraph) { return TEXT("no-rule-graph"); }
+
+	UEdGraphNode* ResultNode = nullptr;
+	for (UEdGraphNode* Node : RuleGraph->Nodes)
+	{
+		if (Node && Node->GetClass()->GetName().Contains(TEXT("AnimGraphNode_TransitionResult")))
+		{
+			ResultNode = Node;
+			break;
+		}
+	}
+	if (!ResultNode) { return TEXT("no-result-node"); }
+
+	UEdGraphPin* InPin = nullptr;
+	for (UEdGraphPin* Pin : ResultNode->Pins)
+	{
+		if (Pin && Pin->Direction == EGPD_Input && Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean) { InPin = Pin; break; }
+	}
+	if (!InPin) { return TEXT("no-in-pin"); }
+
+	UK2Node_CallFunction* LitNode = NewObject<UK2Node_CallFunction>(RuleGraph);
+	LitNode->FunctionReference.SetExternalMember(
+		GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, MakeLiteralBool), UKismetSystemLibrary::StaticClass());
+	LitNode->CreateNewGuid();
+	LitNode->PostPlacedNewNode();
+	LitNode->AllocateDefaultPins();
+	LitNode->NodePosX = ResultNode->NodePosX - 220;
+	LitNode->NodePosY = ResultNode->NodePosY;
+	RuleGraph->AddNode(LitNode, false, false);
+	LitNode->SetFlags(RF_Transactional);
+
+	if (UEdGraphPin* ValuePin = LitNode->FindPin(TEXT("Value")))
+	{
+		ValuePin->DefaultValue = TEXT("true");
+	}
+	UEdGraphPin* RetPin = LitNode->GetReturnValuePin();
+	if (!RetPin) { return TEXT("no-return-pin"); }
+
+	InPin->BreakAllPinLinks();
+	const UEdGraphSchema* Schema = RuleGraph->GetSchema();
+	if (Schema) { Schema->TryCreateConnection(RetPin, InPin); }
+	return InPin->LinkedTo.Num() > 0 ? TEXT("rule-set") : TEXT("connect-failed");
+}
+
 FString FUnrealAgentServer::HandleAddAnimState(const FString& Body)
 {
 	TSharedPtr<FJsonObject> Json = ParseBodyJson(Body);
@@ -330,6 +420,7 @@ FString FUnrealAgentServer::HandleAddAnimState(const FString& Body)
 	NewState->SetFlags(RF_Transactional);
 
 	// Optionally set animation asset
+	FString WireDiag;
 	FString AnimAssetName = Json->GetStringField(TEXT("animationAsset"));
 	if (!AnimAssetName.IsEmpty() && NewState->GetBoundGraph())
 	{
@@ -358,6 +449,11 @@ FString FUnrealAgentServer::HandleAddAnimState(const FString& Body)
 			SeqNode->NodePosX = 0;
 			SeqNode->NodePosY = 0;
 			NewState->GetBoundGraph()->AddNode(SeqNode, false, false);
+			WireDiag = WireAnimNodeToStateResult(NewState->GetBoundGraph(), SeqNode);
+		}
+		else
+		{
+			WireDiag = TEXT("anim-asset-not-found");
 		}
 	}
 
@@ -371,6 +467,7 @@ FString FUnrealAgentServer::HandleAddAnimState(const FString& Body)
 	Result->SetStringField(TEXT("graph"), GraphName);
 	Result->SetStringField(TEXT("nodeId"), NewState->NodeGuid.ToString());
 	Result->SetBoolField(TEXT("saved"), bSaved);
+	if (!WireDiag.IsEmpty()) { Result->SetStringField(TEXT("poseWiring"), WireDiag); }
 	return JsonToString(Result);
 }
 
@@ -520,9 +617,22 @@ FString FUnrealAgentServer::HandleAddAnimTransition(const FString& Body)
 	{
 		TransNode->PriorityOrder = (int32)Json->GetNumberField(TEXT("priority"));
 	}
-	if (Json->HasField(TEXT("bBidirectional")))
+	bool bBidi = false;
+	if (Json->HasField(TEXT("bBidirectional"))) { bBidi = Json->GetBoolField(TEXT("bBidirectional")); }
+	if (bBidi)
 	{
-		TransNode->Bidirectional = Json->GetBoolField(TEXT("bBidirectional"));
+		// UE5.7 doesn't support the Bidirectional flag (compile warns + ignores it).
+		// Create a second one-way transition in the reverse direction instead.
+		UAnimStateTransitionNode* ReverseNode = NewObject<UAnimStateTransitionNode>(SMGraph);
+		ReverseNode->CreateNewGuid();
+		ReverseNode->PostPlacedNewNode();
+		ReverseNode->AllocateDefaultPins();
+		ReverseNode->NodePosX = TransNode->NodePosX;
+		ReverseNode->NodePosY = TransNode->NodePosY + 48;
+		SMGraph->AddNode(ReverseNode, false, false);
+		ReverseNode->SetFlags(RF_Transactional);
+		ReverseNode->CreateConnections(ToState, FromState);
+		if (Json->HasField(TEXT("crossfadeDuration"))) { ReverseNode->CrossfadeDuration = (float)Json->GetNumberField(TEXT("crossfadeDuration")); }
 	}
 
 	// Compile and save
@@ -536,7 +646,7 @@ FString FUnrealAgentServer::HandleAddAnimTransition(const FString& Body)
 	Result->SetStringField(TEXT("nodeId"), TransNode->NodeGuid.ToString());
 	Result->SetNumberField(TEXT("crossfadeDuration"), TransNode->CrossfadeDuration);
 	Result->SetNumberField(TEXT("priorityOrder"), TransNode->PriorityOrder);
-	Result->SetBoolField(TEXT("bBidirectional"), TransNode->Bidirectional);
+	Result->SetBoolField(TEXT("bBidirectional"), bBidi);
 	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }
@@ -611,10 +721,16 @@ FString FUnrealAgentServer::HandleSetTransitionRule(const FString& Body)
 		TransNode->Bidirectional = Json->GetBoolField(TEXT("bBidirectional"));
 		ChangedCount++;
 	}
+	FString RuleDiag;
+	if (Json->HasField(TEXT("alwaysTrue")) && Json->GetBoolField(TEXT("alwaysTrue")))
+	{
+		RuleDiag = SetTransitionAlwaysTrue(TransNode);
+		ChangedCount++;
+	}
 
 	if (ChangedCount == 0)
 	{
-		return MakeErrorJson(TEXT("No properties to update. Provide at least one of: crossfadeDuration, blendMode, priorityOrder, logicType, bBidirectional"));
+		return MakeErrorJson(TEXT("No properties to update. Provide at least one of: crossfadeDuration, blendMode, priorityOrder, logicType, bBidirectional, alwaysTrue"));
 	}
 
 	// Compile and save
@@ -631,6 +747,7 @@ FString FUnrealAgentServer::HandleSetTransitionRule(const FString& Body)
 	Result->SetNumberField(TEXT("priorityOrder"), TransNode->PriorityOrder);
 	Result->SetNumberField(TEXT("logicType"), (int32)TransNode->LogicType.GetValue());
 	Result->SetBoolField(TEXT("bBidirectional"), TransNode->Bidirectional);
+	if (!RuleDiag.IsEmpty()) { Result->SetStringField(TEXT("ruleWiring"), RuleDiag); }
 	Result->SetBoolField(TEXT("saved"), bSaved);
 	return JsonToString(Result);
 }
@@ -985,6 +1102,8 @@ FString FUnrealAgentServer::HandleSetStateAnimation(const FString& Body)
 	}
 
 	SeqNode->SetAnimationAsset(AnimSeq);
+	// Wire the sequence player into the state's Output Pose so the state actually plays it.
+	WireAnimNodeToStateResult(InnerGraph, SeqNode);
 
 	// Compile and save
 	FKismetEditorUtilities::CompileBlueprint(AnimBP);

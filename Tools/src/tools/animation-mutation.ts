@@ -66,8 +66,14 @@ export function registerAnimationTools(server: McpServer): void {
 
       try {
         const data = await uePost("/api/add-anim-state", body);
+        const wiring = (data as { poseWiring?: string })?.poseWiring;
+        const warnings =
+          wiring === "anim-asset-not-found"
+            ? [`animationAsset '${animationAsset}' not found — state created empty. Use list_assets(classFilter:"AnimSequence") to find the exact path.`]
+            : undefined;
         return toMcp(wrapRaw(data, {
           refs: autoRefs(data),
+          warnings,
           nextSteps: [
             "use add_anim_transition to connect this state to other states",
             "use set_state_animation to assign an animation to this state",
@@ -158,8 +164,9 @@ export function registerAnimationTools(server: McpServer): void {
       priorityOrder: z.number().optional().describe("Transition priority order"),
       logicType: z.number().optional().describe("Transition logic type (0=Standard, 1=Custom)"),
       bBidirectional: z.boolean().optional().describe("Whether the transition is bidirectional"),
+      alwaysTrue: z.boolean().optional().describe("Author an always-enter rule (MakeLiteralBool true wired to the result). Clears the 'will never be taken' warning for an unconditional transition."),
     },
-    async ({ blueprint, graph, fromState, toState, crossfadeDuration, blendMode, priorityOrder, logicType, bBidirectional }) => {
+    async ({ blueprint, graph, fromState, toState, crossfadeDuration, blendMode, priorityOrder, logicType, bBidirectional, alwaysTrue }) => {
       const err = await ensureUE();
       if (err) return toMcp(fail("UE_NOT_RUNNING", err));
 
@@ -169,6 +176,7 @@ export function registerAnimationTools(server: McpServer): void {
       if (priorityOrder !== undefined) body.priorityOrder = priorityOrder;
       if (logicType !== undefined) body.logicType = logicType;
       if (bBidirectional !== undefined) body.bBidirectional = bBidirectional;
+      if (alwaysTrue !== undefined) body.alwaysTrue = alwaysTrue;
 
       try {
         const data = await uePost("/api/set-transition-rule", body);
