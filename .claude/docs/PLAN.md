@@ -8,12 +8,19 @@ All workstreams implemented, built, and verified live:
 - ✅ **D summary un-regression** — `get_blueprint_summary`/`describe_graph`/`describe_material` return the compact summary in `data` again (163 vs 1830 chars confirmed). ADR-008.
 - ✅ **E capabilities** — `list_assets` (97 anim seqs / 2 skel meshes found live), `set_component_default` (SCS), `connect_anim_entry` (entry-not-connected warning gone), `get_class_api` (TS). All committed; new C++ routes verified.
 
-### Follow-up gaps surfaced (anim authoring, not blocking)
-- `add_anim_state(animationAsset=…)` creates the state but doesn't wire the sequence
-  into the state's inner Output Pose ("Result was visible but ignored").
-- `add_anim_transition(bBidirectional)` warns "bidirectional not supported" in UE5.7 —
-  should emit two one-way transitions instead.
-- Transitions created without a rule warn "will never be taken" — expose/auto-add a rule.
+### Follow-up gaps surfaced (anim authoring) — CLOSED (2026-06-07)
+- ✅ `add_anim_state(animationAsset=…)` now wires the sequence player into the state's
+  inner Output Pose (`WireAnimNodeToStateResult`); response carries `poseWiring` diag.
+  Verified live: both states report `wired`, "Result ignored" warnings gone.
+- ✅ `add_anim_transition(bBidirectional)` now emits two one-way transitions (Idle→Run +
+  Run→Idle) instead of the unsupported UE5.7 Bidirectional flag. Verified live.
+- ✅ Transitions without a rule warn "will never be taken" — `set_transition_rule` gains
+  `alwaysTrue` which authors a `MakeLiteralBool(true)` node wired to the TransitionResult.
+  Full state machine (2 states + 2 transitions + rules + entry) validates **0 warnings/0 errors**.
+- ✅ `add_anim_state` with an unresolved `animationAsset` no longer silently succeeds —
+  emits `poseWiring:"anim-asset-not-found"` → TS warning pointing to `list_assets`.
+
+### Remaining (not blocking)
 - `set_component_default` covers SCS components only; inherited components (Character
   Mesh) still need `python_exec`.
 
