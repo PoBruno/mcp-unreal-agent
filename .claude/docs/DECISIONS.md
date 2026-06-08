@@ -272,3 +272,58 @@ documented in `.claude/rules/mcp-tools.md`.
 ### Consequences
 - Chaining works end-to-end without manual translation.
 - `refs` carries both the input-name and the `*Id` alias (small duplication, intentional).
+
+---
+
+## ADR-010: first-class compile + generic node-property reflection
+
+**Status:** Accepted
+**Date:** 2026-06-07
+
+### Problem
+The agent had no dedicated equivalent of the editor's core authoring loop: the
+**Compile** button (with Compiler Results) and the **Details panel** (select a node,
+read/edit any property). Compiling only happened implicitly inside `validate_blueprint`
+(SkipSave, text-scraped log) or as a side effect of save handlers. Node config was only
+reachable through hard-coded per-class extraction (`SerializeNode`); `list_properties`
+was class-level only. So "compile and give me the results", "list ALL properties of this
+node", and "set any property" were not expressible.
+
+### Decision
+Add three tools mirroring the real workflow:
+- **`compile_blueprint`** — the Compile button. Returns structured Compiler Results:
+  `status` (UpToDate/UpToDateWithWarnings/Error/Dirty), `errorCount`/`warningCount`,
+  per-message `{severity, graph, nodeId, nodeTitle, nodeClass, message}`, `compileTimeMs`,
+  `needsSave`, and `errorNodeIds[]` as refs (the agent jumps straight to the broken node,
+  like a Compiler-Results hyperlink). Options: `save`, `refreshNodes` (Refresh Nodes
+  first — fixes stale/orphaned pins), `retryOnError` (one refresh+recompile for transient
+  cross-dependency errors). SEH-wrapped; `needsSave` (package dirty) is reported
+  separately from `status` (recompile-needed) — they are independent.
+- **`get_node_properties`** — generic `TFieldIterator<FProperty>` over any graph node:
+  name, type, category, editable/readOnly, value, plus enrichment — enum `allowedValues`
+  (dropdown options), numeric `UIMin/UIMax/ClampMin/ClampMax`, object `allowedClass`, and
+  one level of struct expansion (`subProperties`, e.g. an anim node's embedded `Node`
+  struct → `PlayRate`, `bLoopAnimation`).
+- **`set_node_property`** — `ImportText_Direct` on any property, dotted `Struct.Sub`
+  path supported (e.g. `Node.PlayRate`); reconstructs pins + marks for recompile.
+
+Also extended `set_variable_metadata` with the remaining Details-panel knobs:
+`blueprintReadOnly` (CPF_BlueprintReadOnly), `sliderMin/Max` (UIMin/UIMax), `clampMin/Max`
+(ClampMin/ClampMax).
+
+### Alternatives rejected
+- **Route compile through `validate_blueprint`.** Validate is "check without saving"; a
+  first-class Compile needs save/refresh/retry options and a richer result. Kept both.
+- **Per-node-class property tools.** Doesn't scale; generic FProperty reflection covers
+  every node uniformly.
+- **`FCompilerResultsLog` capture.** Per-node `bHasCompilerMessage`/`ErrorMsg`/`ErrorType`
+  flags already carry the structured, node-targeted messages cleanly; using them avoids
+  the duplicate `[AssetLog]` noise from log scraping. Revisit if graph-level (non-node)
+  messages need surfacing.
+
+### Consequences
+- The agent can run the real loop: mutate → `compile_blueprint` → read errors by nodeId
+  → fix the node → recompile → save.
+- `get_node_properties`/`set_node_property` generalize the four ad-hoc setters
+  (`set_actor_property`, `set_widget_property`, CDO `set_blueprint_default`) for graph
+  nodes; future work can unify them under one object-property surface.

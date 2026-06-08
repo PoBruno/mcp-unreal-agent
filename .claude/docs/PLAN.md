@@ -20,9 +20,24 @@ All workstreams implemented, built, and verified live:
 - ✅ `add_anim_state` with an unresolved `animationAsset` no longer silently succeeds —
   emits `poseWiring:"anim-asset-not-found"` → TS warning pointing to `list_assets`.
 
+### Editor-parity additions (2026-06-07) — DONE
+Researched the real BP-editor workflow (Compile button + Compiler Results, Details panel,
+shortcuts, logs) and closed the biggest parity gaps. ADR-010.
+- ✅ `compile_blueprint` — first-class Compile returning structured Compiler Results
+  (status, error/warning counts, per-message graph+nodeId+title, compileTimeMs, needsSave,
+  errorNodeIds refs); options save/refreshNodes/retryOnError. Verified live (UpToDate, 5ms).
+- ✅ `get_node_properties` — list ALL properties+values of any node (Details panel),
+  with enum allowedValues, numeric UIMin/UIMax/ClampMin/ClampMax, object allowedClass,
+  one-level struct expansion. Verified: SequencePlayer → 21 subProps incl PlayRate.
+- ✅ `set_node_property` — edit any property incl dotted `Struct.Sub` paths. Verified:
+  `Node.PlayRate=1.5` stuck.
+- ✅ `set_variable_metadata` + blueprintReadOnly, sliderMin/Max, clampMin/Max. Verified: 5 changes.
+
 ### Remaining (not blocking)
 - `set_component_default` covers SCS components only; inherited components (Character
   Mesh) still need `python_exec`.
+- Unify `set_node_property` with the actor/widget/CDO setters under one object-property surface.
+- Surface graph-level (non-node) compiler messages via `FCompilerResultsLog` if needed.
 
 ---
 
