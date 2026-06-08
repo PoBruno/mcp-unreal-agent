@@ -102,7 +102,7 @@ export function registerVariableTools(server: McpServer): void {
 
   server.tool(
     "set_variable_metadata",
-    "Set variable properties beyond type: category, tooltip, replication, exposeOnSpawn, editability, isPrivate. Provide any combination of fields to update.",
+    "Set variable properties beyond type: category, tooltip, replication, exposeOnSpawn, editability, isPrivate, blueprintReadOnly, and slider/clamp ranges. Provide any combination of fields to update.",
     {
       blueprint: z.string().describe("Blueprint name or package path"),
       variable: z.string().describe("Variable name"),
@@ -113,8 +113,13 @@ export function registerVariableTools(server: McpServer): void {
       editability: z.enum(["editAnywhere", "editDefaultsOnly", "editInstanceOnly", "none"]).optional()
         .describe("Edit visibility: editAnywhere (CDO + instances), editDefaultsOnly (CDO only), editInstanceOnly (instances only), none"),
       isPrivate: z.boolean().optional().describe("Mark variable as private (only accessible within this Blueprint)"),
+      blueprintReadOnly: z.boolean().optional().describe("Blueprint Read Only — readable in graphs but not settable (CPF_BlueprintReadOnly)"),
+      sliderMin: z.number().optional().describe("Details-panel slider minimum (UIMin metadata)"),
+      sliderMax: z.number().optional().describe("Details-panel slider maximum (UIMax metadata)"),
+      clampMin: z.number().optional().describe("Hard clamp minimum on the value (ClampMin metadata)"),
+      clampMax: z.number().optional().describe("Hard clamp maximum on the value (ClampMax metadata)"),
     },
-    async ({ blueprint, variable, category, tooltip, replication, exposeOnSpawn, editability, isPrivate }) => {
+    async ({ blueprint, variable, category, tooltip, replication, exposeOnSpawn, editability, isPrivate, blueprintReadOnly, sliderMin, sliderMax, clampMin, clampMax }) => {
       const err = await ensureUE();
       if (err) return { content: [{ type: "text" as const, text: err }] };
 
@@ -125,6 +130,11 @@ export function registerVariableTools(server: McpServer): void {
       if (exposeOnSpawn !== undefined) body.exposeOnSpawn = exposeOnSpawn;
       if (editability !== undefined) body.editability = editability;
       if (isPrivate !== undefined) body.isPrivate = isPrivate;
+      if (blueprintReadOnly !== undefined) body.blueprintReadOnly = blueprintReadOnly;
+      if (sliderMin !== undefined) body.sliderMin = sliderMin;
+      if (sliderMax !== undefined) body.sliderMax = sliderMax;
+      if (clampMin !== undefined) body.clampMin = clampMin;
+      if (clampMax !== undefined) body.clampMax = clampMax;
 
       try {
         const data = await uePost("/api/set-variable-metadata", body);

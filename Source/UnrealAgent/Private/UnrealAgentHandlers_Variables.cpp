@@ -602,9 +602,51 @@ FString FUnrealAgentServer::HandleSetVariableMetadata(const FString& Body)
 		Changes.Add(MakeShared<FJsonValueObject>(Change));
 	}
 
+	// Blueprint Read Only
+	if (Json->HasField(TEXT("blueprintReadOnly")))
+	{
+		bool bOld = (VarDesc->PropertyFlags & CPF_BlueprintReadOnly) != 0;
+		bool bNew = Json->GetBoolField(TEXT("blueprintReadOnly"));
+		if (bNew)
+			VarDesc->PropertyFlags |= CPF_BlueprintReadOnly;
+		else
+			VarDesc->PropertyFlags &= ~CPF_BlueprintReadOnly;
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), TEXT("blueprintReadOnly"));
+		Change->SetStringField(TEXT("oldValue"), bOld ? TEXT("true") : TEXT("false"));
+		Change->SetStringField(TEXT("newValue"), bNew ? TEXT("true") : TEXT("false"));
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
+	// Slider range (UIMin / UIMax) and value/clamp range (ClampMin / ClampMax)
+	struct FRangeMeta { const TCHAR* Field; const TCHAR* Key; };
+	const FRangeMeta RangeMetas[] = {
+		{ TEXT("sliderMin"), TEXT("UIMin") },
+		{ TEXT("sliderMax"), TEXT("UIMax") },
+		{ TEXT("clampMin"),  TEXT("ClampMin") },
+		{ TEXT("clampMax"),  TEXT("ClampMax") },
+	};
+	for (const FRangeMeta& RM : RangeMetas)
+	{
+		if (!Json->HasField(RM.Field)) continue;
+		FString NewVal = FString::SanitizeFloat(Json->GetNumberField(RM.Field));
+		// Trim a trailing ".0" so ints read cleanly
+		if (NewVal.EndsWith(TEXT(".0"))) { NewVal = NewVal.LeftChop(2); }
+		FString OldVal;
+		FBlueprintEditorUtils::GetBlueprintVariableMetaData(BP, VarFName, nullptr, RM.Key, OldVal);
+		FBlueprintEditorUtils::SetBlueprintVariableMetaData(BP, VarFName, nullptr, RM.Key, NewVal);
+
+		TSharedRef<FJsonObject> Change = MakeShared<FJsonObject>();
+		Change->SetStringField(TEXT("field"), RM.Field);
+		Change->SetStringField(TEXT("oldValue"), OldVal);
+		Change->SetStringField(TEXT("newValue"), NewVal);
+		Changes.Add(MakeShared<FJsonValueObject>(Change));
+	}
+
 	if (Changes.Num() == 0)
 	{
-		return MakeErrorJson(TEXT("No metadata fields specified. Provide at least one of: category, tooltip, replication, exposeOnSpawn, isPrivate, editability"));
+		return MakeErrorJson(TEXT("No metadata fields specified. Provide at least one of: category, tooltip, replication, exposeOnSpawn, isPrivate, editability, blueprintReadOnly, sliderMin, sliderMax, clampMin, clampMax"));
 	}
 
 	UE_LOG(LogTemp, Display, TEXT("UnrealAgent: SetVariableMetadata on '%s.%s' — %d field(s) changed"),

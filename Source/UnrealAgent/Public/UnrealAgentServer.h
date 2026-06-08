@@ -150,6 +150,11 @@ private:
 	FString HandleValidateBlueprint(const FString& Body);
 	FString HandleValidateAllBlueprints(const FString& Body);
 
+	// ----- Compile + generic node property inspection/editing -----
+	FString HandleCompileBlueprint(const FString& Body);
+	FString HandleGetNodeProperties(const FString& Body);
+	FString HandleSetNodeProperty(const FString& Body);
+
 	// ----- Pin manipulation (write) -----
 	FString HandleConnectPins(const FString& Body);
 	FString HandleDisconnectPin(const FString& Body);
